@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cincinnati Pothole Repair Dashboard</title>
+    <meta charset="UTF-8">
+    <link rel="icon" href="data:;base64,iVBORwOKGO=" />
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <header class="dashboard-header">
+        <h1>Cincinnati Pothole Repair Dashboard</h1>
+        <p class="dashboard-help">Explore pothole repair data across Cincinnati neighborhoods from January 2023 to September 2025.</p>
+        <div class="dashboard-controls">
+            <div class="control-group">
+                <label for="statusFilter">Status Filter</label>
+                <select id="statusFilter">
+                    <option value="">All Statuses</option>
+                    <option value="CLOSED">Closed</option>
+                    <option value="OPEN">Open</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="neighborhoodFilter">Neighborhood</label>
+                <select id="neighborhoodFilter">
+                    <option value="">All Neighborhoods</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="dateRangeStart">Start Date</label>
+                <input id="dateRangeStart" type="date" value="2023-01-01">
+            </div>
+            <div class="control-group">
+                <label for="dateRangeEnd">End Date</label>
+                <input id="dateRangeEnd" type="date" value="2025-09-30">
+            </div>
+            <div class="control-group">
+                <label for="addressSearch">Address Search</label>
+                <input id="addressSearch" type="search" list="addressSearchList" placeholder="Type address" autocomplete="off">
+                <datalist id="addressSearchList"></datalist>
+            </div>
+            <div class="control-group">
+                <button id="resetViewButton" type="button">Reset view</button>
+            </div>
+        </div>
+        <div class="dashboard-tabs" role="tablist" aria-label="Dashboard views">
+            <button class="tab-button" data-panel="timeline" type="button" role="tab" aria-selected="false">Timeline View</button>
+            <button class="tab-button" data-panel="neighborhood" type="button" role="tab" aria-selected="false">By Neighborhood</button>
+            <button class="tab-button" data-panel="status" type="button" role="tab" aria-selected="false">Repair Status</button>
+            <button class="tab-button" data-panel="map" type="button" role="tab" aria-selected="false">Map View</button>
+        </div>
+    </header>
+
+    <main id="dashboard">
+        <section class="panel" id="panel-timeline">
+            <div class="panel-header">
+                <h2 id="timeline-chart-title">Pothole Reports Over Time</h2>
+            </div>
+            <div id="timeline-chart" class="chart-host"></div>
+        </section>
+
+        <section class="panel" id="panel-neighborhood">
+            <div class="panel-header">
+                <h2 id="neighborhood-chart-title">Reports by Neighborhood</h2>
+            </div>
+            <div id="neighborhood-chart" class="chart-host"></div>
+        </section>
+
+        <section class="panel" id="panel-status">
+            <div class="panel-header">
+                <h2 id="status-chart-title">Repair Status Overview</h2>
+            </div>
+            <div id="status-chart" class="chart-host"></div>
+        </section>
+
+        <section class="panel" id="panel-map">
+            <div class="panel-header">
+                <h2 id="map-chart-title">Pothole Locations Map</h2>
+            </div>
+            <div id="map" class="chart-host"></div>
+        </section>
+    </main>
+
+    <div id="tooltip"></div>
+
+    <script src="js/d3.v6.min.js"></script>
+    <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <script>
+        // Data file configuration for pothole dashboard
+        const DATA_CONFIG = {
+            potholeData: "data/Pothole Data for Flywheel 010123-090725.csv",
+            worldMap: "data/world.json" // Keep for potential Cincinnati neighborhood mapping
+        };
+    </script>
+    <script src="js/main.js"></script>
+</body>
+</html>
