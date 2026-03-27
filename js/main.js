@@ -506,6 +506,7 @@ function renderStatusChart(data) {
     .style("font-size", "12px");
 }
 
+/*
 function renderMapChart(data) {
   const container = d3.select("#map");
   container.selectAll("*").remove();
@@ -540,6 +541,92 @@ function renderMapChart(data) {
 
   const projection = d3.geoMercator()
     .domain([[lonExtent[0], latExtent[0]], [lonExtent[1], latExtent[1]]])
+    .fitSize([width - 20, height - 20], {
+      type: "Polygon",
+      coordinates: [[
+        [lonExtent[0], latExtent[0]],
+        [lonExtent[0], latExtent[1]],
+        [lonExtent[1], latExtent[1]],
+        [lonExtent[1], latExtent[0]],
+        [lonExtent[0], latExtent[0]]
+      ]]
+    });
+
+  const g = svg.append("g")
+    .attr("transform", "translate(10, 10)");
+
+  // Color scale based on number of potholes
+  const colorScale = d3.scaleSequential(d3.interpolateYlOrRd)
+    .domain([0, d3.max(validData, d => d.numPotholes) || 1]);
+
+  // Add points
+  g.selectAll(".pothole-point")
+    .data(validData)
+    .join("circle")
+    .attr("class", "pothole-point")
+    .attr("cx", d => projection([d.longitude, d.latitude])[0])
+    .attr("cy", d => projection([d.longitude, d.latitude])[1])
+    .attr("r", d => Math.max(3, Math.sqrt(d.numPotholes + 1) * 2))
+    .attr("fill", d => colorScale(d.numPotholes))
+    .attr("opacity", 0.7)
+    .attr("stroke", "white")
+    .attr("stroke-width", 1)
+    .on("mouseover", (event, d) => {
+      showTooltip(event, `
+        <strong>${d.address}</strong><br/>
+        Status: ${d.status}<br/>
+        Neighborhood: ${d.neighborhood}<br/>
+        Potholes: ${d.numPotholes}<br/>
+        Created: ${d3.timeFormat("%m/%d/%Y")(d.dateCreated)}
+      `);
+    })
+    .on("mouseout", hideTooltip);
+
+  // Add zoom behavior
+  const zoom = d3.zoom()
+    .scaleExtent([0.5, 10])
+    .on("zoom", (event) => {
+      g.attr("transform", `translate(10, 10) ${event.transform}`);
+    });
+
+  svg.call(zoom);
+}
+*/
+
+function renderMapChart(data) {
+  const container = d3.select("#map");
+  container.selectAll("*").remove();
+
+  if (data.length === 0) {
+    container.append("p").text("No data available for current filters.");
+    return;
+  }
+
+  const containerRect = container.node().getBoundingClientRect();
+  const width = containerRect.width;
+  const height = 500;
+
+  const svg = container.append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+  // Filter data with valid coordinates
+  const validData = data.filter(d => 
+    d.latitude && d.longitude && 
+    !isNaN(d.latitude) && !isNaN(d.longitude)
+  );
+
+  if (validData.length === 0) {
+    container.append("p").text("No location data available for current filters.");
+    return;
+  }
+
+  // Create projection based on data bounds
+  const latExtent = d3.extent(validData, d => d.latitude);
+  const lonExtent = d3.extent(validData, d => d.longitude);
+
+  const projection = d3.geoMercator()
+    .domain([[lonExtent[0], latExtent[0]], [lonExtent[1], latExtent[1]]]) // `.domain` doesn't exist on geoMercator()
     .fitSize([width - 20, height - 20], {
       type: "Polygon",
       coordinates: [[
