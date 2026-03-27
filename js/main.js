@@ -217,6 +217,9 @@ function renderDashboard() {
     case "neighborhood":
       renderNeighborhoodChart(filteredData);
       break;
+    case "deptartment":
+      renderDeptChart(filteredData);
+      break;
     case "status":
       renderStatusChart(filteredData);
       break;
@@ -434,6 +437,12 @@ function renderNeighborhoodChart(data) {
     .attr("y", -margin.left + 15)
     .attr("text-anchor", "middle")
     .text("Number of Reports");
+}
+
+function renderDeptChart(data) {
+  const container = d3.select("#department-chart");
+  container.selectAll("*").remove();
+
 }
 
 function renderStatusChart(data) {
