@@ -1,6 +1,6 @@
 // Pothole Dashboard Configuration
 const CHART_MARGIN = { top: 20, right: 30, bottom: 40, left: 60 };
-const PANEL_OPTIONS = ["timeline", "neighborhood", "status", "map"];
+const PANEL_OPTIONS = ["timeline", "neighborhood", "department", "status", "map"];
 
 const DEFAULT_SELECTIONS = {
   activePanel: "timeline",
@@ -16,7 +16,7 @@ let appState = null;
 console.log('Loading pothole data from:', DATA_CONFIG.potholeData);
 
 // Load and process pothole data
-d3.csv(DATA_CONFIG.potholeData)
+/*d3.csv(DATA_CONFIG.potholeData)
   .then(data => {
     console.log('Raw data loaded, rows:', data.length);
     // Process and clean the data
@@ -139,6 +139,116 @@ d3.csv(DATA_CONFIG.potholeData)
     setTimeout(() => message.remove(), 10000);
   });
 
+d3.csv(DATA_CONFIG.potholeData2)
+  .then(data => {
+    console.log('Raw data loaded, rows:', data.length);
+    // Process and clean the data
+    const processedData = data.map(d => ({
+      srNumber: d.SR_NUMBER,
+      userId: d.USER_ID,
+      srType: d.SR_TYPE,
+      srTypeDesc: d.SR_TYPE_DESC,
+      priority: d.PRIORITY,
+      deptName: d.DEPT_NAME,
+      methodReceived: d.METHOD_RECEIVED,
+      neighborhood: d.NEIGHBORHOOD,
+      timeReceived: d.TIME_RECEIVED,
+      dateCreated: new Date(d.DATE_CREATED),
+      plannedCompletionDays: +d.PLANNED_COMPLETION_DAYS || 0,
+      dateClosed: d.DATE_CLOSED ? new Date(d.DATE_CLOSED) : null
+    })).filter(d => d.dateCreated && !isNaN(d.dateCreated.getTime()));
+
+    // Extract unique values for filters
+    const neighborhoods = [...new Set(processedData.map(d => d.neighborhood))].sort();
+    
+
+    console.log('Processed data:', processedData.length, 'records');
+    console.log('Sample record:', processedData[0]);
+    
+    appState = {
+    data: originalData,        // first dataset
+    deptData: processedData,   // second dataset
+    neighborhoods,
+    statuses,
+    addresses,
+    selections: { ...DEFAULT_SELECTIONS }
+};
+    
+    console.log('App state initialized');
+
+    setupFilters();
+    bindEvents();
+    syncUrlState();
+    renderDashboard();
+
+    window.addEventListener("resize", debounce(renderDashboard, 150));
+  })
+  .catch(error => {
+    console.error("Error loading pothole data:", error);
+    setupFilters();
+    bindEvents(); 
+    renderDashboard();
+    
+    // Show message to user
+    const message = document.createElement('div');
+    message.style.cssText = 'position: fixed; top: 10px; right: 10px; background: #fef3c7; border: 1px solid #f59e0b; padding: 10px; border-radius: 6px; z-index: 1000; max-width: 300px; font-size: 12px;';
+    message.innerHTML = `
+      <strong>Using Sample Data</strong><br/>
+      Could not load CSV file. Showing sample data for demonstration.<br/>
+      <strong>To fix:</strong> Serve from <a href="http://localhost:8000" target="_blank" style="color: #1d4ed8;">http://localhost:8000</a>
+    `;
+    document.body.appendChild(message);
+    
+    setTimeout(() => message.remove(), 10000);
+  });*/
+Promise.all([
+  d3.csv(DATA_CONFIG.potholeData),
+  d3.csv(DATA_CONFIG.potholeData2)
+]).then(([data1, data2]) => {
+
+  // ✅ FIRST DATASET (original)
+  const processedData1 = data1.map(d => ({
+    srNumber: d.SR_NUMBER,
+    status: d.SR_STATUS,
+    address: d.ADDRESS,
+    neighborhood: d.NEIGHBORHOOD,
+    dateCreated: new Date(d.DATE_CREATED),
+    numPotholes: +d.NUM_POTHOLES || 0,
+    latitude: +d.LATITUDE,
+    longitude: +d.LONGITUDE
+  })).filter(d => d.dateCreated && !isNaN(d.dateCreated));
+
+  // ✅ SECOND DATASET (dept)
+  const processedData2 = data2.map(d => ({
+    deptName: d.DEPT_NAME,
+    neighborhoods: d.NEIGHBORHOOD,
+    dateCreated: new Date(d.DATE_CREATED)
+  })).filter(d => d.dateCreated && !isNaN(d.dateCreated));
+
+  // ✅ Filters ONLY from dataset 1
+  const neighborhoods = [...new Set(processedData1.map(d => d.neighborhood))].sort();
+  const statuses = [...new Set(processedData1.map(d => d.status))].sort();
+  const addresses = [...new Set(processedData1.map(d => d.address))].slice(0, 100);
+
+  // ✅ SINGLE appState (correct)
+  appState = {
+    data: processedData1,
+    deptData: processedData2,
+    neighborhoods,
+    statuses,
+    addresses,
+    selections: { ...DEFAULT_SELECTIONS }
+  };
+
+  console.log("Both datasets loaded");
+
+  setupFilters();
+  bindEvents();
+  syncUrlState();
+  renderDashboard();
+
+}); 
+
 function setupFilters() {
   // Setup neighborhood filter
   const neighborhoodSelect = d3.select("#neighborhoodFilter");
@@ -217,8 +327,8 @@ function renderDashboard() {
     case "neighborhood":
       renderNeighborhoodChart(filteredData);
       break;
-    case "deptartment":
-      renderDeptChart(filteredData);
+    case "department":
+      renderDeptChart();
       break;
     case "status":
       renderStatusChart(filteredData);
@@ -439,10 +549,101 @@ function renderNeighborhoodChart(data) {
     .text("Number of Reports");
 }
 
-function renderDeptChart(data) {
+function renderDeptChart() {
+  const data = appState.deptData;
   const container = d3.select("#department-chart");
   container.selectAll("*").remove();
-
+  console.log("Rendering department chart with data:", data.length, "records");
+  if (data.length === 0) {
+    container.append("p").text("No data available for current filters.");
+    return;
+  }
+ 
+  const counts = d3.rollup(data, v => v.length, d => d.deptName || "NA");
+  const chartData = Array.from(counts, ([dept, count]) => ({ dept, count }))
+    .filter(d => d.dept !== "NA")
+    .sort((a, b) => b.count - a.count);
+ 
+  const margin = { top: 20, right: 100, bottom: 50, left: 210 };
+  const containerRect = container.node().getBoundingClientRect();
+  const width  = containerRect.width - margin.left - margin.right;
+  const height = Math.max(300, chartData.length * 38) - margin.top - margin.bottom;
+ 
+  const svg = container.append("svg")
+    .attr("width",  width  + margin.left + margin.right)
+    .attr("height", height + margin.top  + margin.bottom);
+ 
+  const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+ 
+  const xScale = d3.scaleLinear()
+    .domain([0, d3.max(chartData, d => d.count)])
+    .nice()
+    .range([0, width]);
+ 
+  const yScale = d3.scaleBand()
+    .domain(chartData.map(d => d.dept))
+    .range([0, height])
+    .padding(0.2);
+ 
+  // gridlines
+  g.append("g")
+    .call(d3.axisBottom(xScale).ticks(6).tickSize(height).tickFormat(""))
+    .attr("transform", `translate(0,0)`)
+    .call(g => g.select(".domain").remove())
+    .call(g => g.selectAll("line").attr("stroke", "#e5e7eb"));
+ 
+  g.append("g")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d >= 1000 ? `${(d/1000).toFixed(0)}k` : d));
+ 
+  g.append("g")
+    .call(d3.axisLeft(yScale))
+    .selectAll("text")
+    .style("font-size", "11px");
+ 
+  // sequential blue scale — darkest = busiest department
+  const colorScale = d3.scaleSequential(d3.interpolateBlues)
+    .domain([chartData.length, 0]);
+ 
+  g.selectAll(".bar")
+    .data(chartData)
+    .join("rect")
+    .attr("class", "bar")
+    .attr("x", 0)
+    .attr("y", d => yScale(d.dept))
+    .attr("width", d => xScale(d.count))
+    .attr("height", yScale.bandwidth())
+    .attr("fill", (_, i) => colorScale(i))
+    .attr("rx", 3)
+    .on("mouseover", (event, d) => {
+      const pct = ((d.count / data.length) * 100).toFixed(1);
+      showTooltip(event, `
+        <strong>${d.dept}</strong><br/>
+        Reports: ${d.count.toLocaleString()}<br/>
+        Share: ${pct}%
+      `);
+    })
+    .on("mouseout", hideTooltip);
+ 
+  g.selectAll(".bar-label")
+    .data(chartData)
+    .join("text")
+    .attr("class", "bar-label")
+    .attr("x", d => xScale(d.count) + 6)
+    .attr("y", d => yScale(d.dept) + yScale.bandwidth() / 2)
+    .attr("dy", "0.35em")
+    .style("font-size", "11px")
+    .style("fill", "#374151")
+    .text(d => d.count >= 1000 ? `${(d.count / 1000).toFixed(1)}k` : d.count);
+ 
+  g.append("text")
+    .attr("x", width / 2)
+    .attr("y", height + margin.bottom - 8)
+    .attr("text-anchor", "middle")
+    .style("font-size", "12px")
+    .style("fill", "#6b7280")
+    .text("Number of Reports");
 }
 
 function renderStatusChart(data) {

@@ -66,6 +66,13 @@
             <div id="neighborhood-chart" class="chart-host"></div>
         </section>
 
+        <section class="panel" id="panel-department">
+            <div class="panel-header">
+                <h2>Reports by Department</h2>
+            </div>
+            <div id="department-chart" class="chart-host"></div>
+        </section>
+
         <section class="panel" id="panel-status">
             <div class="panel-header">
                 <h2 id="status-chart-title">Repair Status Overview</h2>
@@ -89,7 +96,7 @@
         // Data file configuration for pothole dashboard
         const DATA_CONFIG = {
             potholeData: "data/Pothole Data for Flywheel 010123-090725.csv",
-            worldMap: "data/world.json" // Keep for potential Cincinnati neighborhood mapping
+            potholeData2:"data/selectPotHoles.csv", // missing colums from orginal data
         };
     </script>
     <script src="js/main.js"></script>
