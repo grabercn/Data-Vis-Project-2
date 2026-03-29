@@ -1234,7 +1234,7 @@ function renderMapChart(data) {
     console.error("Map container not found");
     return;
   }
-
+  
   // Check if Leaflet is loaded
   if (typeof L === 'undefined') {
     console.error("Leaflet library not loaded. Waiting...");
@@ -1265,7 +1265,9 @@ function renderMapChart(data) {
   // Filter data with valid coordinates
   const validData = data.filter(d => 
     d.latitude && d.longitude && 
-    !isNaN(d.latitude) && !isNaN(d.longitude)
+    !isNaN(d.latitude) && !isNaN(d.longitude) &&
+    d.latitude >= -90 && d.latitude <= 90 &&
+    d.longitude >= -180 && d.longitude <= 180
   );
 
   if (validData.length === 0) {
@@ -1299,7 +1301,7 @@ function renderMapChart(data) {
     
     mapInstance = L.map('map', {
       center: [centerLat, centerLon],
-      zoom: 12,
+      zoom: 10,
       dragging: true,
       scrollWheelZoom: true,
       zoomControl: true,
@@ -1341,13 +1343,13 @@ function renderMapChart(data) {
 
     // Add markers with popup/tooltip for individual data inspection
     validData.forEach((d, idx) => {
-      const marker = L.circleMarker([d.latitude, d.longitude], {
-        radius: Math.min(5 + Math.sqrt(d.numPotholes), 15),
+      const marker = L.circle([d.latitude, d.longitude], {
+        radius: Math.min(10 + Math.sqrt(d.numPotholes) * 3, 25),
         fillColor: '#2563eb',
         color: '#1e40af',
-        weight: 1,
-        opacity: 0.3,
-        fillOpacity: 0.2
+        weight: 2,
+        opacity: 0.8,
+        fillOpacity: 0.6
       });
 
       // Add popup on click for detailed info
@@ -1370,15 +1372,14 @@ function renderMapChart(data) {
 
       // Add hover effects - highlight on hover
       marker.on('mouseover', function() {
-        this.setStyle({ opacity: 0.7, fillOpacity: 0.5, weight: 2 });
+        this.setStyle({ opacity: 1.0, fillOpacity: 0.8, weight: 3 });
       });
 
       marker.on('mouseout', function() {
-        this.setStyle({ opacity: 0.3, fillOpacity: 0.2, weight: 1 });
+        this.setStyle({ opacity: 0.8, fillOpacity: 0.6, weight: 2 });
       });
 
       markers.push(marker);
-      // console.log(`Prepared marker ${idx + 1}/${validData.length} at (${d.latitude}, ${d.longitude}) with ${d.numPotholes} potholes`);
     });
 
     // Add layers based on current view mode
@@ -1389,6 +1390,13 @@ function renderMapChart(data) {
     } else if (currentViewMode === 'points') {
       markers.forEach(marker => marker.addTo(mapInstance));
       console.log(`Added ${markers.length} individual markers to the map`);
+      
+      // Fit map bounds to show all markers
+      if (markers.length > 0) {
+        const group = new L.featureGroup(markers);
+        mapInstance.fitBounds(group.getBounds().pad(0.1)); // Add 10% padding
+        console.log('Fitted map bounds to markers');
+      }
     }
 
     // Add legend based on current view mode
