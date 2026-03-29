@@ -10,7 +10,8 @@ const DEFAULT_SELECTIONS = {
   neighborhoodFilter: "",
   dateRangeStart: "2023-01-01",
   dateRangeEnd: "2025-09-30",
-  addressQuery: ""
+  addressQuery: "",
+  mapViewMode: "heatmap"  // "heatmap" or "points"
 };
 
 let appState = null;
@@ -323,6 +324,19 @@ function bindEvents() {
       renderDashboard();
     }
   });
+
+  // Map view toggle controls
+  d3.select("#heatmapToggle").on("click", function() {
+    appState.selections.mapViewMode = "heatmap";
+    updateMapViewToggleButtons();
+    toggleMapLayers();
+  });
+
+  d3.select("#pointsToggle").on("click", function() {
+    appState.selections.mapViewMode = "points";
+    updateMapViewToggleButtons();
+    toggleMapLayers();
+  });
 }
 
 function renderActiveFilters() {
@@ -420,6 +434,7 @@ function renderDashboard() {
       break;
     case "map":
       renderMapChart(filteredData);
+      updateMapViewToggleButtons();
       break;
   }
 }
@@ -1219,7 +1234,7 @@ function renderMapChart(data) {
     console.error("Map container not found");
     return;
   }
-
+  
   // Check if Leaflet is loaded
   if (typeof L === 'undefined') {
     console.error("Leaflet library not loaded. Waiting...");
@@ -1250,7 +1265,9 @@ function renderMapChart(data) {
   // Filter data with valid coordinates
   const validData = data.filter(d => 
     d.latitude && d.longitude && 
-    !isNaN(d.latitude) && !isNaN(d.longitude)
+    !isNaN(d.latitude) && !isNaN(d.longitude) &&
+    d.latitude >= -90 && d.latitude <= 90 &&
+    d.longitude >= -180 && d.longitude <= 180
   );
 
   if (validData.length === 0) {
@@ -1284,7 +1301,7 @@ function renderMapChart(data) {
     
     mapInstance = L.map('map', {
       center: [centerLat, centerLon],
-      zoom: 12,
+      zoom: 10,
       dragging: true,
       scrollWheelZoom: true,
       zoomControl: true,
@@ -1306,7 +1323,7 @@ function renderMapChart(data) {
       Math.min(d.numPotholes / 5, 1) // Normalize intensity (0-1), using number of potholes
     ]);
 
-    // Create and add heatmap layer
+    // Create heatmap layer (only add to map if in heatmap mode)
     const heatmapLayer = L.heatLayer(heatmapData, {
       radius: 30,
       blur: 25,
@@ -1319,18 +1336,21 @@ function renderMapChart(data) {
         0.75: '#ff7f00',
         1.0: '#ff0000'
       }
-    }).addTo(mapInstance);
+    });
 
-    // Add markers with popup/tooltip on top of heatmap for individual data inspection
+    // Create array to store individual markers
+    const markers = [];
+
+    // Add markers with popup/tooltip for individual data inspection
     validData.forEach((d, idx) => {
-      const marker = L.circleMarker([d.latitude, d.longitude], {
-        radius: Math.min(5 + Math.sqrt(d.numPotholes), 15),
+      const marker = L.circle([d.latitude, d.longitude], {
+        radius: Math.min(10 + Math.sqrt(d.numPotholes) * 3, 25),
         fillColor: '#2563eb',
         color: '#1e40af',
-        weight: 1,
-        opacity: 0.3,
-        fillOpacity: 0.2
-      }).addTo(mapInstance);
+        weight: 2,
+        opacity: 0.8,
+        fillOpacity: 0.6
+      });
 
       // Add popup on click for detailed info
       marker.bindPopup(`
@@ -1352,19 +1372,38 @@ function renderMapChart(data) {
 
       // Add hover effects - highlight on hover
       marker.on('mouseover', function() {
-        this.setStyle({ opacity: 0.7, fillOpacity: 0.5, weight: 2 });
+        this.setStyle({ opacity: 1.0, fillOpacity: 0.8, weight: 3 });
       });
 
       marker.on('mouseout', function() {
-        this.setStyle({ opacity: 0.3, fillOpacity: 0.2, weight: 1 });
+        this.setStyle({ opacity: 0.8, fillOpacity: 0.6, weight: 2 });
       });
+
+      markers.push(marker);
     });
 
-    // Add legend
+    // Add layers based on current view mode
+    const currentViewMode = appState.selections.mapViewMode;
+    if (currentViewMode === 'heatmap') {
+      heatmapLayer.addTo(mapInstance);
+      console.log(`Added heatmap layer with ${heatmapData.length} points`);
+    } else if (currentViewMode === 'points') {
+      markers.forEach(marker => marker.addTo(mapInstance));
+      console.log(`Added ${markers.length} individual markers to the map`);
+      
+      // Fit map bounds to show all markers
+      if (markers.length > 0) {
+        const group = new L.featureGroup(markers);
+        mapInstance.fitBounds(group.getBounds().pad(0.1)); // Add 10% padding
+        console.log('Fitted map bounds to markers');
+      }
+    }
+
+    // Add legend based on current view mode
     const legend = L.control({ position: 'bottomright' });
     legend.onAdd = function(map) {
-      const div = L.DomUtil.create('div', 'heatmap-legend');
-      
+      const div = L.DomUtil.create('div', 'map-legend');
+
       let activeFilters = '';
       if (appState.selections.neighborhoodFilter) {
         activeFilters += `<div style="color: #2563eb; font-weight: 600; margin-top: 6px;"> ${appState.selections.neighborhoodFilter}</div>`;
@@ -1372,35 +1411,47 @@ function renderMapChart(data) {
       if (appState.selections.statusFilter) {
         activeFilters += `<div style="color: #059669; font-weight: 600;">✓ ${appState.selections.statusFilter}</div>`;
       }
-      
-      div.innerHTML = `
-        <strong style="display: block; margin-bottom: 6px;">Heatmap Intensity</strong>
-        <div class="heatmap-legend-item">
-          <div class="heatmap-legend-color" style="background-color: #0000ff;"></div>
-          <span>Low</span>
-        </div>
-        <div class="heatmap-legend-item">
-          <div class="heatmap-legend-color" style="background-color: #ffff00;"></div>
-          <span>Medium</span>
-        </div>
-        <div class="heatmap-legend-item">
-          <div class="heatmap-legend-color" style="background-color: #ff0000;"></div>
-          <span>High</span>
-        </div>
-        <div style="font-size: 11px; margin-top: 8px; color: #666;">
-          Data Points: ${validData.length}
-        </div>
-        ${activeFilters ? `<div style="font-size: 11px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #e5e7eb;">${activeFilters}</div>` : ''}
-      `;
+
+      if (currentViewMode === 'heatmap') {
+        div.innerHTML = `
+          <strong style="display: block; margin-bottom: 6px;">Heatmap Intensity</strong>
+          <div class="heatmap-legend-item">
+            <div class="heatmap-legend-color" style="background-color: #0000ff;"></div>
+            <span>Low</span>
+          </div>
+          <div class="heatmap-legend-item">
+            <div class="heatmap-legend-color" style="background-color: #ffff00;"></div>
+            <span>Medium</span>
+          </div>
+          <div class="heatmap-legend-item">
+            <div class="heatmap-legend-color" style="background-color: #ff0000;"></div>
+            <span>High</span>
+          </div>
+          <div style="font-size: 11px; margin-top: 8px; color: #666;">
+            Data Points: ${validData.length}
+          </div>
+          ${activeFilters ? `<div style="font-size: 11px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #e5e7eb;">${activeFilters}</div>` : ''}
+        `;
+      } else {
+        div.innerHTML = `
+          <strong style="display: block; margin-bottom: 6px;">Individual Points</strong>
+          <div style="font-size: 11px; color: #666;">
+            Click points for details<br/>
+            Data Points: ${validData.length}
+          </div>
+        `;
+      }
       L.DomEvent.disableClickPropagation(div);
       return div;
     };
     legend.addTo(mapInstance);
 
-    // Store reference for linked interactions
+    // Store references for linked interactions and toggling
     appState.mapData = validData;
     appState.mapInstance = mapInstance;
     appState.heatmapLayer = heatmapLayer;
+    appState.markers = markers;
+    appState.mapLegend = legend;
 
     // Fit map bounds to data
     const bounds = L.latLngBounds(validData.map(d => [d.latitude, d.longitude]));
@@ -1440,6 +1491,7 @@ function syncControlsFromState() {
   d3.select("#dateRangeStart").property("value", appState.selections.dateRangeStart);
   d3.select("#dateRangeEnd").property("value", appState.selections.dateRangeEnd);
   d3.select("#addressSearch").property("value", appState.selections.addressQuery);
+  updateMapViewToggleButtons();
 }
 
 function syncUrlState() {
@@ -1505,4 +1557,78 @@ function filterByStatus(status) {
   appState.selections.statusFilter = status;
   syncControlsFromState();
   renderDashboard();
+}
+
+// Map view toggle functions
+function updateMapViewToggleButtons() {
+  // Update button active states
+  d3.select("#heatmapToggle").classed("active", appState.selections.mapViewMode === "heatmap");
+  d3.select("#pointsToggle").classed("active", appState.selections.mapViewMode === "points");
+}
+
+function toggleMapLayers() {
+  if (!appState.mapInstance) return;
+
+  const map = appState.mapInstance;
+  const currentViewMode = appState.selections.mapViewMode;
+
+  // Remove existing layers
+  if (appState.heatmapLayer && map.hasLayer(appState.heatmapLayer)) {
+    map.removeLayer(appState.heatmapLayer);
+  }
+  if (appState.markers) {
+    appState.markers.forEach(marker => {
+      if (map.hasLayer(marker)) {
+        map.removeLayer(marker);
+      }
+    });
+  }
+
+  // Add the appropriate layer
+  if (currentViewMode === 'heatmap' && appState.heatmapLayer) {
+    appState.heatmapLayer.addTo(map);
+  } else if (currentViewMode === 'points' && appState.markers) {
+    appState.markers.forEach(marker => marker.addTo(map));
+  }
+
+  // Update legend......
+  if (appState.mapLegend) {
+    map.removeControl(appState.mapLegend);
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function(map) {
+      const div = L.DomUtil.create('div', 'map-legend');
+      if (currentViewMode === 'heatmap') {
+        div.innerHTML = `
+          <strong style="display: block; margin-bottom: 6px;">Heatmap Intensity</strong>
+          <div class="heatmap-legend-item">
+            <div class="heatmap-legend-color" style="background-color: #0000ff;"></div>
+            <span>Low</span>
+          </div>
+          <div class="heatmap-legend-item">
+            <div class="heatmap-legend-color" style="background-color: #ffff00;"></div>
+            <span>Medium</span>
+          </div>
+          <div class="heatmap-legend-item">
+            <div class="heatmap-legend-color" style="background-color: #ff0000;"></div>
+            <span>High</span>
+          </div>
+          <div style="font-size: 11px; margin-top: 8px; color: #666;">
+            Data Points: ${appState.mapData ? appState.mapData.length : 0}
+          </div>
+        `;
+      } else {
+        div.innerHTML = `
+          <strong style="display: block; margin-bottom: 6px;">Individual Points</strong>
+          <div style="font-size: 11px; color: #666;">
+            Click points for details<br/>
+            Data Points: ${appState.mapData ? appState.mapData.length : 0}
+          </div>
+        `;
+      }
+      L.DomEvent.disableClickPropagation(div);
+      return div;
+    };
+    legend.addTo(map);
+    appState.mapLegend = legend;
+  }
 }
