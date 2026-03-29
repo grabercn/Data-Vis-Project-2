@@ -1131,17 +1131,24 @@ function renderMapChart(data) {
           Status: ${d.status}<br/>
           Neighborhood: ${d.neighborhood}<br/>
           Potholes: ${d.numPotholes}<br/>
-          Created: ${d3.timeFormat("%m/%d/%Y")(d.dateCreated)}
+          Created: ${d3.timeFormat("%m/%d/%Y")(d.dateCreated)}<br/>
+          <hr style="margin: 6px 0;"/>
+          <a href="#" onclick="filterByNeighborhood('${d.neighborhood}'); return false;" style="color: #2563eb; text-decoration: none;">
+             Filter by neighborhood
+          </a><br/>
+          <a href="#" onclick="filterByStatus('${d.status}'); return false;" style="color: #2563eb; text-decoration: none;">
+            ✓ Filter by status
+          </a>
         </div>
       `);
 
-      // Add hover effects
+      // Add hover effects - highlight on hover
       marker.on('mouseover', function() {
-        this.setStyle({ opacity: 0.7, fillOpacity: 0.5 });
+        this.setStyle({ opacity: 0.7, fillOpacity: 0.5, weight: 2 });
       });
 
       marker.on('mouseout', function() {
-        this.setStyle({ opacity: 0.3, fillOpacity: 0.2 });
+        this.setStyle({ opacity: 0.3, fillOpacity: 0.2, weight: 1 });
       });
     });
 
@@ -1149,6 +1156,15 @@ function renderMapChart(data) {
     const legend = L.control({ position: 'bottomright' });
     legend.onAdd = function(map) {
       const div = L.DomUtil.create('div', 'heatmap-legend');
+      
+      let activeFilters = '';
+      if (appState.selections.neighborhoodFilter) {
+        activeFilters += `<div style="color: #2563eb; font-weight: 600; margin-top: 6px;"> ${appState.selections.neighborhoodFilter}</div>`;
+      }
+      if (appState.selections.statusFilter) {
+        activeFilters += `<div style="color: #059669; font-weight: 600;">✓ ${appState.selections.statusFilter}</div>`;
+      }
+      
       div.innerHTML = `
         <strong style="display: block; margin-bottom: 6px;">Heatmap Intensity</strong>
         <div class="heatmap-legend-item">
@@ -1166,6 +1182,7 @@ function renderMapChart(data) {
         <div style="font-size: 11px; margin-top: 8px; color: #666;">
           Data Points: ${validData.length}
         </div>
+        ${activeFilters ? `<div style="font-size: 11px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #e5e7eb;">${activeFilters}</div>` : ''}
       `;
       L.DomEvent.disableClickPropagation(div);
       return div;
@@ -1257,4 +1274,17 @@ function debounce(func, wait) {
     clearTimeout(timeout);
     timeout = setTimeout(later, wait);
   };
+}
+
+// Added for heatmap marker interaction
+function filterByNeighborhood(neighborhood) {
+  appState.selections.neighborhoodFilter = neighborhood;
+  syncControlsFromState();
+  renderDashboard();
+}
+
+function filterByStatus(status) {
+  appState.selections.statusFilter = status;
+  syncControlsFromState();
+  renderDashboard();
 }
