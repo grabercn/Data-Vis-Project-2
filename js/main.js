@@ -1,12 +1,14 @@
 // Pothole Dashboard Configuration
 const CHART_MARGIN = { top: 20, right: 30, bottom: 40, left: 60 };
+const CONTEXT_HEIGHT = 60;
+const BRUSH_DEBOUNCE_MS = 50;
 const PANEL_OPTIONS = ["timeline", "neighborhood", "department", "status", "map", "priority", "method"];
 
 const DEFAULT_SELECTIONS = {
   activePanel: "timeline",
   statusFilter: "",
   neighborhoodFilter: "",
-  dateRangeStart: "2023-01-01", 
+  dateRangeStart: "2023-01-01",
   dateRangeEnd: "2025-09-30",
   addressQuery: ""
 };
@@ -239,7 +241,11 @@ Promise.all([
     neighborhoods,
     statuses,
     addresses,
-    selections: { ...DEFAULT_SELECTIONS }
+    selections: { ...DEFAULT_SELECTIONS },
+    brushSelection: null,       // [startDate, endDate] from timeline brush
+    selectedDepartments: [],    // from clicking department bars (multi-select)
+    selectedPriorities: [],     // from clicking priority bars (multi-select)
+    selectedMethods: []         // from clicking method bars (multi-select)
   };
 
   console.log("Both datasets loaded");
@@ -300,6 +306,10 @@ function bindEvents() {
 
   d3.select("#resetViewButton").on("click", () => {
     appState.selections = { ...DEFAULT_SELECTIONS };
+    appState.brushSelection = null;
+    appState.selectedDepartments = [];
+    appState.selectedPriorities = [];
+    appState.selectedMethods = [];
     syncControlsFromState();
     renderDashboard();
   });
@@ -315,11 +325,76 @@ function bindEvents() {
   });
 }
 
+function renderActiveFilters() {
+  const container = d3.select("#active-filters");
+  container.selectAll("*").remove();
+
+  const filters = [];
+
+  if (appState.brushSelection) {
+    const fmt = d3.timeFormat("%b %Y");
+    filters.push({
+      label: "Date: " + fmt(appState.brushSelection[0]) + " \u2013 " + fmt(appState.brushSelection[1]),
+      clear: () => { appState.brushSelection = null; }
+    });
+  }
+
+  if (appState.selections.neighborhoodFilter) {
+    filters.push({
+      label: "Neighborhood: " + appState.selections.neighborhoodFilter,
+      clear: () => { appState.selections.neighborhoodFilter = ""; syncControlsFromState(); }
+    });
+  }
+
+  if (appState.selections.statusFilter) {
+    filters.push({
+      label: "Status: " + appState.selections.statusFilter,
+      clear: () => { appState.selections.statusFilter = ""; syncControlsFromState(); }
+    });
+  }
+
+  if (appState.selectedDepartments.length > 0) {
+    filters.push({
+      label: "Dept: " + appState.selectedDepartments.join(", "),
+      clear: () => { appState.selectedDepartments = []; }
+    });
+  }
+
+  if (appState.selectedPriorities.length > 0) {
+    filters.push({
+      label: "Priority: " + appState.selectedPriorities.join(", "),
+      clear: () => { appState.selectedPriorities = []; }
+    });
+  }
+
+  if (appState.selectedMethods.length > 0) {
+    filters.push({
+      label: "Method: " + appState.selectedMethods.join(", "),
+      clear: () => { appState.selectedMethods = []; }
+    });
+  }
+
+  if (filters.length === 0) return;
+
+  filters.forEach(f => {
+    const badge = container.append("span").attr("class", "filter-badge");
+    badge.append("span").text(f.label);
+    badge.append("button")
+      .attr("class", "filter-badge-clear")
+      .text("\u00d7")
+      .on("click", () => {
+        f.clear();
+        renderDashboard();
+      });
+  });
+}
+
 function renderDashboard() {
   if (!appState) return;
 
   updatePanelVisibility();
-  
+  renderActiveFilters();
+
   const filteredData = getFilteredData();
 
   switch(appState.selections.activePanel) {
@@ -327,19 +402,21 @@ function renderDashboard() {
       renderTimelineChart(filteredData);
       break;
     case "neighborhood":
-      renderNeighborhoodChart(filteredData);
+      // Show all neighborhoods (exclude own filter) so clicking doesn't hide others
+      renderNeighborhoodChart(getFilteredData({ excludeNeighborhood: true }));
       break;
     case "department":
-      renderDeptChart();
+      renderDeptChart(getFilteredDeptData({ excludeDepartment: true }));
       break;
     case "priority":
-      renderPriorityChart();
+      renderPriorityChart(getFilteredDeptData({ excludePriority: true }));
       break;
     case "method":
-      renderMethodChart();
+      renderMethodChart(getFilteredDeptData({ excludeMethod: true }));
       break;
     case "status":
-      renderStatusChart(filteredData);
+      // Show all statuses (exclude own filter) so clicking doesn't hide others
+      renderStatusChart(getFilteredData({ excludeStatus: true }));
       break;
     case "map":
       renderMapChart(filteredData);
@@ -347,16 +424,17 @@ function renderDashboard() {
   }
 }
 
-function getFilteredData() {
+function getFilteredData(options) {
+  const opts = options || {};
   let filtered = appState.data;
 
-  // Filter by status
-  if (appState.selections.statusFilter) {
+  // Filter by status (skip if this chart's own selection is excluded)
+  if (appState.selections.statusFilter && !opts.excludeStatus) {
     filtered = filtered.filter(d => d.status === appState.selections.statusFilter);
   }
 
-  // Filter by neighborhood  
-  if (appState.selections.neighborhoodFilter) {
+  // Filter by neighborhood (skip if this chart's own selection is excluded)
+  if (appState.selections.neighborhoodFilter && !opts.excludeNeighborhood) {
     filtered = filtered.filter(d => d.neighborhood === appState.selections.neighborhoodFilter);
   }
 
@@ -367,12 +445,52 @@ function getFilteredData() {
 
   // Filter by address search
   if (appState.selections.addressQuery) {
-    filtered = filtered.filter(d => 
+    filtered = filtered.filter(d =>
       d.address.toLowerCase().includes(appState.selections.addressQuery)
     );
   }
 
+  // Cross-chart linked selection: timeline brush date range
+  if (appState.brushSelection) {
+    const [bStart, bEnd] = appState.brushSelection;
+    filtered = filtered.filter(d => d.dateCreated >= bStart && d.dateCreated <= bEnd);
+  }
+
   return filtered;
+}
+
+// Filtered dept data — exclude flags let a chart skip its own selection
+function getFilteredDeptData(options) {
+  const opts = options || {};
+  let data = appState.deptData;
+
+  if (appState.selections.neighborhoodFilter) {
+    data = data.filter(d => d.neighborhoods === appState.selections.neighborhoodFilter);
+  }
+
+  const startDate = new Date(appState.selections.dateRangeStart);
+  const endDate = new Date(appState.selections.dateRangeEnd);
+  data = data.filter(d => d.dateCreated >= startDate && d.dateCreated <= endDate);
+
+  // Cross-chart linked selections
+  if (appState.brushSelection) {
+    const [bStart, bEnd] = appState.brushSelection;
+    data = data.filter(d => d.dateCreated >= bStart && d.dateCreated <= bEnd);
+  }
+
+  if (appState.selectedDepartments.length > 0 && !opts.excludeDepartment) {
+    data = data.filter(d => appState.selectedDepartments.includes(d.deptName));
+  }
+
+  if (appState.selectedPriorities.length > 0 && !opts.excludePriority) {
+    data = data.filter(d => appState.selectedPriorities.includes(d.priority));
+  }
+
+  if (appState.selectedMethods.length > 0 && !opts.excludeMethod) {
+    data = data.filter(d => appState.selectedMethods.includes(d.method));
+  }
+
+  return data;
 }
 
 function renderTimelineChart(data) {
@@ -384,22 +502,23 @@ function renderTimelineChart(data) {
     return;
   }
 
-  const margin = CHART_MARGIN;
+  const margin = { ...CHART_MARGIN, bottom: CHART_MARGIN.bottom + CONTEXT_HEIGHT + 20 };
   const containerRect = container.node().getBoundingClientRect();
   const width = containerRect.width - margin.left - margin.right;
-  const height = 400 - margin.top - margin.bottom;
+  const mainHeight = 300;
+  const totalHeight = mainHeight + margin.top + margin.bottom;
 
   const svg = container.append("svg")
     .attr("width", width + margin.left + margin.right)
-    .attr("height", height + margin.top + margin.bottom);
+    .attr("height", totalHeight);
 
   const g = svg.append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-  // Group data by date for timeline
+  // Group data by month for timeline
   const dateFormatter = d3.timeFormat("%Y-%m");
-  const grouped = d3.rollup(data, 
-    v => v.length, 
+  const grouped = d3.rollup(data,
+    v => v.length,
     d => dateFormatter(d.dateCreated)
   );
 
@@ -408,41 +527,65 @@ function renderTimelineChart(data) {
     count: count
   })).sort((a, b) => a.date - b.date);
 
-  // Scales
+  if (timelineData.length === 0) return;
+
+  // Full x domain (used by context brush)
+  const fullXDomain = d3.extent(timelineData, d => d.date);
+
+  // Determine visible domain based on brush selection
+  const brushSel = appState.brushSelection;
+  const focusXDomain = brushSel ? [brushSel[0], brushSel[1]] : fullXDomain;
+
+  // Filter visible data for the main (focus) chart
+  const focusData = brushSel
+    ? timelineData.filter(d => d.date >= brushSel[0] && d.date <= brushSel[1])
+    : timelineData;
+
+  // --- Focus (main) chart scales ---
   const xScale = d3.scaleTime()
-    .domain(d3.extent(timelineData, d => d.date))
+    .domain(focusXDomain)
     .range([0, width]);
 
   const yScale = d3.scaleLinear()
-    .domain([0, d3.max(timelineData, d => d.count)])
+    .domain([0, d3.max(focusData, d => d.count) || 1])
     .nice()
-    .range([height, 0]);
+    .range([mainHeight, 0]);
 
-  // Line generator
   const line = d3.line()
     .x(d => xScale(d.date))
     .y(d => yScale(d.count))
     .curve(d3.curveMonotoneX);
 
-  // Add axes
-  g.append("g")
-    .attr("transform", `translate(0,${height})`)
-    .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %Y")));
+  // Clip path so points/line don't overflow during brush zoom
+  svg.append("defs").append("clipPath")
+    .attr("id", "clip-timeline")
+    .append("rect")
+    .attr("width", width)
+    .attr("height", mainHeight);
+
+  const focusGroup = g.append("g").attr("clip-path", "url(#clip-timeline)");
+
+  // Focus axes
+  const xAxis = g.append("g")
+    .attr("class", "axis x-axis")
+    .attr("transform", `translate(0,${mainHeight})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d3.timeFormat("%b %Y")));
 
   g.append("g")
+    .attr("class", "axis y-axis")
     .call(d3.axisLeft(yScale));
 
-  // Add line
-  g.append("path")
-    .datum(timelineData)
+  // Focus line
+  focusGroup.append("path")
+    .datum(focusData)
     .attr("fill", "none")
     .attr("stroke", "#2563eb")
     .attr("stroke-width", 2)
     .attr("d", line);
 
-  // Add dots
-  g.selectAll(".dot")
-    .data(timelineData)
+  // Focus dots
+  focusGroup.selectAll(".dot")
+    .data(focusData)
     .join("circle")
     .attr("class", "dot")
     .attr("cx", d => xScale(d.date))
@@ -457,20 +600,102 @@ function renderTimelineChart(data) {
     })
     .on("mouseout", hideTooltip);
 
-  // Add labels
+  // Axis labels
   g.append("text")
     .attr("x", width / 2)
-    .attr("y", height + margin.bottom - 5)
+    .attr("y", mainHeight + 35)
     .attr("text-anchor", "middle")
     .text("Date");
 
   g.append("text")
     .attr("transform", "rotate(-90)")
-    .attr("x", -height / 2)
+    .attr("x", -mainHeight / 2)
     .attr("y", -margin.left + 15)
     .attr("text-anchor", "middle")
     .text("Number of Reports");
+
+  // --- Context (brush) area below the main chart ---
+  const contextY = mainHeight + 50;
+  const context = g.append("g")
+    .attr("class", "context")
+    .attr("transform", `translate(0,${contextY})`);
+
+  const contextXScale = d3.scaleTime()
+    .domain(fullXDomain)
+    .range([0, width]);
+
+  const contextYScale = d3.scaleLinear()
+    .domain([0, d3.max(timelineData, d => d.count) || 1])
+    .range([CONTEXT_HEIGHT, 0]);
+
+  const contextLine = d3.line()
+    .x(d => contextXScale(d.date))
+    .y(d => contextYScale(d.count))
+    .curve(d3.curveMonotoneX);
+
+  // Context area fill
+  const contextArea = d3.area()
+    .x(d => contextXScale(d.date))
+    .y0(CONTEXT_HEIGHT)
+    .y1(d => contextYScale(d.count))
+    .curve(d3.curveMonotoneX);
+
+  context.append("path")
+    .datum(timelineData)
+    .attr("fill", "#e0e7ff")
+    .attr("d", contextArea);
+
+  context.append("path")
+    .datum(timelineData)
+    .attr("fill", "none")
+    .attr("stroke", "#9ca3af")
+    .attr("stroke-width", 1)
+    .attr("d", contextLine);
+
+  // Context x-axis
+  context.append("g")
+    .attr("class", "axis")
+    .attr("transform", `translate(0,${CONTEXT_HEIGHT})`)
+    .call(d3.axisBottom(contextXScale).ticks(6).tickFormat(d3.timeFormat("%b '%y")));
+
+  // Brush — on "end" triggers full dashboard re-render (linked filtering)
+  const brush = d3.brushX()
+    .extent([[0, 0], [width, CONTEXT_HEIGHT]])
+    .on("brush", function(event) {
+      if (!event.selection) return;
+      const [x0, x1] = event.selection;
+      appState.brushSelection = [contextXScale.invert(x0), contextXScale.invert(x1)];
+      // Live-update just the timeline focus area while dragging
+      debouncedTimelineUpdate();
+    })
+    .on("end", function(event) {
+      if (!event.selection) {
+        appState.brushSelection = null;
+      } else {
+        const [x0, x1] = event.selection;
+        appState.brushSelection = [contextXScale.invert(x0), contextXScale.invert(x1)];
+      }
+      // On release, the brush selection persists and will filter other tabs
+    });
+
+  const brushG = context.append("g")
+    .attr("class", "brush x-brush")
+    .call(brush);
+
+  // Restore brush position if a selection already exists
+  if (brushSel) {
+    const x0 = contextXScale(brushSel[0]);
+    const x1 = contextXScale(brushSel[1]);
+    brushG.call(brush.move, [x0, x1]);
+  }
 }
+
+// Debounced update that re-renders only the focus portion of the timeline
+const debouncedTimelineUpdate = debounce(() => {
+  if (!appState || appState.selections.activePanel !== "timeline") return;
+  const filteredData = getFilteredData();
+  renderTimelineChart(filteredData);
+}, BRUSH_DEBOUNCE_MS);
 
 function renderNeighborhoodChart(data) {
   const container = d3.select("#neighborhood-chart");
@@ -544,8 +769,9 @@ function renderNeighborhoodChart(data) {
     .attr("width", d => xScale(d.count))
     .attr("height", yScale.bandwidth())
     .attr("fill", (_, i) => colorScale(i))
-    .attr("stroke", d => d.neighborhood === appState.selections.neighborhoodFilter ? "#1f2937" : "none")
-    .attr("stroke-width", 2)
+    .attr("stroke", d => d.neighborhood === appState.selections.neighborhoodFilter ? "#ef4444" : "none")
+    .attr("stroke-width", d => d.neighborhood === appState.selections.neighborhoodFilter ? 3 : 0)
+    .attr("stroke-dasharray", d => d.neighborhood === appState.selections.neighborhoodFilter ? "6,3" : "none")
     .attr("rx", 3)
     .style("cursor", "pointer")
     .on("click", (event, d) => {
@@ -588,22 +814,7 @@ function renderNeighborhoodChart(data) {
     .text("Number of Reports");
 }
 
-function renderDeptChart() {
-  
-  let data = appState.deptData;
-  // Neighborhood filter
-  if (appState.selections.neighborhoodFilter) {
-    data = data.filter(d => d.neighborhoods === appState.selections.neighborhoodFilter);
-  }
-
-  // Date filter
-  const startDate = new Date(appState.selections.dateRangeStart);
-  const endDate = new Date(appState.selections.dateRangeEnd);
-
-  data = data.filter(d => 
-    d.dateCreated >= startDate && d.dateCreated <= endDate
-  );
-
+function renderDeptChart(data) {
   const container = d3.select("#department-chart");
   container.selectAll("*").remove();
 
@@ -611,54 +822,53 @@ function renderDeptChart() {
     container.append("p").text("No data available for current filters.");
     return;
   }
- 
+
   const counts = d3.rollup(data, v => v.length, d => d.deptName || "NA");
   const chartData = Array.from(counts, ([dept, count]) => ({ dept, count }))
     .filter(d => d.dept !== "NA")
     .sort((a, b) => b.count - a.count);
- 
+
   const margin = { top: 20, right: 100, bottom: 50, left: 210 };
   const containerRect = container.node().getBoundingClientRect();
   const width  = containerRect.width - margin.left - margin.right;
   const height = Math.max(300, chartData.length * 38) - margin.top - margin.bottom;
- 
+
   const svg = container.append("svg")
     .attr("width",  width  + margin.left + margin.right)
     .attr("height", height + margin.top  + margin.bottom);
- 
+
   const g = svg.append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
- 
+
   const xScale = d3.scaleLinear()
     .domain([0, d3.max(chartData, d => d.count)])
     .nice()
     .range([0, width]);
- 
+
   const yScale = d3.scaleBand()
     .domain(chartData.map(d => d.dept))
     .range([0, height])
     .padding(0.2);
- 
+
   // gridlines
   g.append("g")
     .call(d3.axisBottom(xScale).ticks(6).tickSize(height).tickFormat(""))
     .attr("transform", `translate(0,0)`)
     .call(g => g.select(".domain").remove())
     .call(g => g.selectAll("line").attr("stroke", "#e5e7eb"));
- 
+
   g.append("g")
     .attr("transform", `translate(0,${height})`)
     .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d >= 1000 ? `${(d/1000).toFixed(0)}k` : d));
- 
+
   g.append("g")
     .call(d3.axisLeft(yScale))
     .selectAll("text")
     .style("font-size", "11px");
- 
-  // sequential blue scale — darkest = busiest department
+
   const colorScale = d3.scaleSequential(d3.interpolateBlues)
     .domain([chartData.length, 0]);
- 
+
   g.selectAll(".bar")
     .data(chartData)
     .join("rect")
@@ -668,17 +878,26 @@ function renderDeptChart() {
     .attr("width", d => xScale(d.count))
     .attr("height", yScale.bandwidth())
     .attr("fill", (_, i) => colorScale(i))
+    .attr("stroke", d => appState.selectedDepartments.includes(d.dept) ? "#ef4444" : "none")
+    .attr("stroke-width", d => appState.selectedDepartments.includes(d.dept) ? 3 : 0)
+    .attr("stroke-dasharray", d => appState.selectedDepartments.includes(d.dept) ? "6,3" : "none")
     .attr("rx", 3)
+    .style("cursor", "pointer")
+    .on("click", (event, d) => {
+      toggleArraySelection(appState.selectedDepartments, d.dept);
+      renderDashboard();
+    })
     .on("mouseover", (event, d) => {
       const pct = ((d.count / data.length) * 100).toFixed(1);
       showTooltip(event, `
         <strong>${d.dept}</strong><br/>
         Reports: ${d.count.toLocaleString()}<br/>
-        Share: ${pct}%
+        Share: ${pct}%<br/>
+        <em>Click to filter</em>
       `);
     })
     .on("mouseout", hideTooltip);
- 
+
   g.selectAll(".bar-label")
     .data(chartData)
     .join("text")
@@ -689,7 +908,7 @@ function renderDeptChart() {
     .style("font-size", "11px")
     .style("fill", "#374151")
     .text(d => d.count >= 1000 ? `${(d.count / 1000).toFixed(1)}k` : d.count);
- 
+
   g.append("text")
     .attr("x", width / 2)
     .attr("y", height + margin.bottom - 8)
@@ -750,8 +969,9 @@ function renderStatusChart(data) {
   arcs.append("path")
     .attr("d", arc)
     .attr("fill", d => colorScale(d.data.status))
-    .attr("stroke", d => d.data.status === appState.selections.statusFilter ? "#1f2937" : "white")
+    .attr("stroke", d => d.data.status === appState.selections.statusFilter ? "#ef4444" : "white")
     .attr("stroke-width", d => d.data.status === appState.selections.statusFilter ? 3 : 2)
+    .attr("stroke-dasharray", d => d.data.status === appState.selections.statusFilter ? "6,3" : "none")
     .style("cursor", "pointer")
     .on("click", (event, d) => {
       // Toggle status filter for linked interaction
@@ -780,21 +1000,7 @@ function renderStatusChart(data) {
     .style("font-size", "10px");
 }
 
-function renderPriorityChart() {
-  let data = appState.deptData;
-  // Neighborhood filter
-  if (appState.selections.neighborhoodFilter) {
-    data = data.filter(d => d.neighborhoods === appState.selections.neighborhoodFilter);
-  }
-
-  // Date filter
-  const startDate = new Date(appState.selections.dateRangeStart);
-  const endDate = new Date(appState.selections.dateRangeEnd);
-
-  data = data.filter(d => 
-    d.dateCreated >= startDate && d.dateCreated <= endDate
-  );
-
+function renderPriorityChart(data) {
   const container = d3.select("#priority-chart");
   container.selectAll("*").remove();
 
@@ -802,54 +1008,53 @@ function renderPriorityChart() {
     container.append("p").text("No data available for current filters.");
     return;
   }
- 
+
   const counts = d3.rollup(data, v => v.length, d => d.priority || "NA");
   const chartData = Array.from(counts, ([priority, count]) => ({ priority, count }))
     .filter(d => d.priority !== "NA")
     .sort((a, b) => b.count - a.count);
- 
+
   const margin = { top: 20, right: 100, bottom: 50, left: 210 };
   const containerRect = container.node().getBoundingClientRect();
   const width  = containerRect.width - margin.left - margin.right;
   const height = Math.max(300, chartData.length * 38) - margin.top - margin.bottom;
- 
+
   const svg = container.append("svg")
     .attr("width",  width  + margin.left + margin.right)
     .attr("height", height + margin.top  + margin.bottom);
- 
+
   const g = svg.append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
- 
+
   const xScale = d3.scaleLinear()
     .domain([0, d3.max(chartData, d => d.count)])
     .nice()
     .range([0, width]);
- 
+
   const yScale = d3.scaleBand()
     .domain(chartData.map(d => d.priority))
     .range([0, height])
     .padding(0.2);
- 
+
   // gridlines
   g.append("g")
     .call(d3.axisBottom(xScale).ticks(6).tickSize(height).tickFormat(""))
     .attr("transform", `translate(0,0)`)
     .call(g => g.select(".domain").remove())
     .call(g => g.selectAll("line").attr("stroke", "#e5e7eb"));
- 
+
   g.append("g")
     .attr("transform", `translate(0,${height})`)
     .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d >= 1000 ? `${(d/1000).toFixed(0)}k` : d));
- 
+
   g.append("g")
     .call(d3.axisLeft(yScale))
     .selectAll("text")
     .style("font-size", "11px");
- 
-  // sequential blue scale — darkest = busiest department
+
   const colorScale = d3.scaleSequential(d3.interpolateBlues)
     .domain([chartData.length, 0]);
- 
+
   g.selectAll(".bar")
     .data(chartData)
     .join("rect")
@@ -859,17 +1064,26 @@ function renderPriorityChart() {
     .attr("width", d => xScale(d.count))
     .attr("height", yScale.bandwidth())
     .attr("fill", (_, i) => colorScale(i))
+    .attr("stroke", d => appState.selectedPriorities.includes(d.priority) ? "#ef4444" : "none")
+    .attr("stroke-width", d => appState.selectedPriorities.includes(d.priority) ? 3 : 0)
+    .attr("stroke-dasharray", d => appState.selectedPriorities.includes(d.priority) ? "6,3" : "none")
     .attr("rx", 3)
+    .style("cursor", "pointer")
+    .on("click", (event, d) => {
+      toggleArraySelection(appState.selectedPriorities, d.priority);
+      renderDashboard();
+    })
     .on("mouseover", (event, d) => {
       const pct = ((d.count / data.length) * 100).toFixed(1);
       showTooltip(event, `
         <strong>${d.priority}</strong><br/>
         Reports: ${d.count.toLocaleString()}<br/>
-        Share: ${pct}%
+        Share: ${pct}%<br/>
+        <em>Click to filter</em>
       `);
     })
     .on("mouseout", hideTooltip);
- 
+
   g.selectAll(".bar-label")
     .data(chartData)
     .join("text")
@@ -880,7 +1094,7 @@ function renderPriorityChart() {
     .style("font-size", "11px")
     .style("fill", "#374151")
     .text(d => d.count >= 1000 ? `${(d.count / 1000).toFixed(1)}k` : d.count);
- 
+
   g.append("text")
     .attr("x", width / 2)
     .attr("y", height + margin.bottom - 8)
@@ -890,21 +1104,7 @@ function renderPriorityChart() {
     .text("Number of Reports");
 }
 
-function renderMethodChart() {
- let data = appState.deptData;
-  // Neighborhood filter
-  if (appState.selections.neighborhoodFilter) {
-    data = data.filter(d => d.neighborhoods === appState.selections.neighborhoodFilter);
-  }
-
-  // Date filter
-  const startDate = new Date(appState.selections.dateRangeStart);
-  const endDate = new Date(appState.selections.dateRangeEnd);
-
-  data = data.filter(d => 
-    d.dateCreated >= startDate && d.dateCreated <= endDate
-  );
-
+function renderMethodChart(data) {
   const container = d3.select("#method-chart");
   container.selectAll("*").remove();
 
@@ -912,54 +1112,53 @@ function renderMethodChart() {
     container.append("p").text("No data available for current filters.");
     return;
   }
- 
+
   const counts = d3.rollup(data, v => v.length, d => d.method || "NA");
   const chartData = Array.from(counts, ([method, count]) => ({ method, count }))
     .filter(d => d.method !== "NA")
     .sort((a, b) => b.count - a.count);
- 
+
   const margin = { top: 20, right: 100, bottom: 50, left: 210 };
   const containerRect = container.node().getBoundingClientRect();
   const width  = containerRect.width - margin.left - margin.right;
   const height = Math.max(300, chartData.length * 38) - margin.top - margin.bottom;
- 
+
   const svg = container.append("svg")
     .attr("width",  width  + margin.left + margin.right)
     .attr("height", height + margin.top  + margin.bottom);
- 
+
   const g = svg.append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
- 
+
   const xScale = d3.scaleLinear()
     .domain([0, d3.max(chartData, d => d.count)])
     .nice()
     .range([0, width]);
- 
+
   const yScale = d3.scaleBand()
     .domain(chartData.map(d => d.method))
     .range([0, height])
     .padding(0.2);
- 
+
   // gridlines
   g.append("g")
     .call(d3.axisBottom(xScale).ticks(6).tickSize(height).tickFormat(""))
     .attr("transform", `translate(0,0)`)
     .call(g => g.select(".domain").remove())
     .call(g => g.selectAll("line").attr("stroke", "#e5e7eb"));
- 
+
   g.append("g")
     .attr("transform", `translate(0,${height})`)
     .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d >= 1000 ? `${(d/1000).toFixed(0)}k` : d));
- 
+
   g.append("g")
     .call(d3.axisLeft(yScale))
     .selectAll("text")
     .style("font-size", "11px");
- 
-  // sequential blue scale — darkest = busiest department
+
   const colorScale = d3.scaleSequential(d3.interpolateBlues)
     .domain([chartData.length, 0]);
- 
+
   g.selectAll(".bar")
     .data(chartData)
     .join("rect")
@@ -969,17 +1168,26 @@ function renderMethodChart() {
     .attr("width", d => xScale(d.count))
     .attr("height", yScale.bandwidth())
     .attr("fill", (_, i) => colorScale(i))
+    .attr("stroke", d => appState.selectedMethods.includes(d.method) ? "#ef4444" : "none")
+    .attr("stroke-width", d => appState.selectedMethods.includes(d.method) ? 3 : 0)
+    .attr("stroke-dasharray", d => appState.selectedMethods.includes(d.method) ? "6,3" : "none")
     .attr("rx", 3)
+    .style("cursor", "pointer")
+    .on("click", (event, d) => {
+      toggleArraySelection(appState.selectedMethods, d.method);
+      renderDashboard();
+    })
     .on("mouseover", (event, d) => {
       const pct = ((d.count / data.length) * 100).toFixed(1);
       showTooltip(event, `
         <strong>${d.method}</strong><br/>
         Reports: ${d.count.toLocaleString()}<br/>
-        Share: ${pct}%
+        Share: ${pct}%<br/>
+        <em>Click to filter</em>
       `);
     })
     .on("mouseout", hideTooltip);
- 
+
   g.selectAll(".bar-label")
     .data(chartData)
     .join("text")
@@ -990,7 +1198,7 @@ function renderMethodChart() {
     .style("font-size", "11px")
     .style("fill", "#374151")
     .text(d => d.count >= 1000 ? `${(d.count / 1000).toFixed(1)}k` : d.count);
- 
+
   g.append("text")
     .attr("x", width / 2)
     .attr("y", height + margin.bottom - 8)
@@ -1249,6 +1457,16 @@ function syncUrlState() {
 
   const nextUrl = `${window.location.pathname}?${params.toString()}`;
   window.history.replaceState({}, "", nextUrl);
+}
+
+// Toggle a value in/out of an array (mutates in place)
+function toggleArraySelection(arr, value) {
+  const idx = arr.indexOf(value);
+  if (idx === -1) {
+    arr.push(value);
+  } else {
+    arr.splice(idx, 1);
+  }
 }
 
 // Utility functions
