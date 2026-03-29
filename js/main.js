@@ -1,6 +1,6 @@
 // Pothole Dashboard Configuration
 const CHART_MARGIN = { top: 20, right: 30, bottom: 40, left: 60 };
-const PANEL_OPTIONS = ["timeline", "neighborhood", "department", "status", "map"];
+const PANEL_OPTIONS = ["timeline", "neighborhood", "department", "status", "map", "priority", "method"];
 
 const DEFAULT_SELECTIONS = {
   activePanel: "timeline",
@@ -221,6 +221,8 @@ Promise.all([
   // ✅ SECOND DATASET (dept)
   const processedData2 = data2.map(d => ({
     deptName: d.DEPT_NAME,
+    priority: d.PRIORITY,
+    method: d.METHOD_RECEIVED,
     neighborhoods: d.NEIGHBORHOOD,
     dateCreated: new Date(d.DATE_CREATED)
   })).filter(d => d.dateCreated && !isNaN(d.dateCreated));
@@ -470,90 +472,6 @@ function renderTimelineChart(data) {
     .text("Number of Reports");
 }
 
-/*function renderNeighborhoodChart(data) {
-  const container = d3.select("#neighborhood-chart");
-  container.selectAll("*").remove();
-
-  if (data.length === 0) {
-    container.append("p").text("No data available for current filters.");
-    return;
-  }
-
-  const margin = CHART_MARGIN;
-  const containerRect = container.node().getBoundingClientRect();
-  const width = containerRect.width - margin.left - margin.right;
-  const height = 500 - margin.top - margin.bottom;
-
-  // Group by neighborhood
-  const neighborhoodCounts = d3.rollup(data, v => v.length, d => d.neighborhood);
-  const chartData = Array.from(neighborhoodCounts, ([neighborhood, count]) => ({
-    neighborhood: neighborhood,
-    count: count
-  })).sort((a, b) => b.count - a.count).slice(0, 15); // Top 15
-
-  const svg = container.append("svg")
-    .attr("width", width + margin.left + margin.right)
-    .attr("height", height + margin.top + margin.bottom);
-
-  const g = svg.append("g")
-    .attr("transform", `translate(${margin.left},${margin.top})`);
-
-  // Scales
-  const xScale = d3.scaleBand()
-    .domain(chartData.map(d => d.neighborhood))
-    .range([0, width])
-    .padding(0.1);
-
-  const yScale = d3.scaleLinear()
-    .domain([0, d3.max(chartData, d => d.count)])
-    .nice()
-    .range([height, 0]);
-
-  // Add axes
-  g.append("g")
-    .attr("transform", `translate(0,${height})`)
-    .call(d3.axisBottom(xScale))
-    .selectAll("text")
-    .style("text-anchor", "end")
-    .attr("dx", "-.8em")
-    .attr("dy", ".15em")
-    .attr("transform", "rotate(-45)");
-
-  g.append("g")
-    .call(d3.axisLeft(yScale));
-
-  // Add bars
-  g.selectAll(".bar")
-    .data(chartData)
-    .join("rect")
-    .attr("class", "bar")
-    .attr("x", d => xScale(d.neighborhood))
-    .attr("y", d => yScale(d.count))
-    .attr("width", xScale.bandwidth())
-    .attr("height", d => height - yScale(d.count))
-    .attr("fill", "#3b82f6")
-    .on("mouseover", (event, d) => {
-      showTooltip(event, `
-        <strong>${d.neighborhood}</strong><br/>
-        Reports: ${d.count}
-      `);
-    })
-    .on("mouseout", hideTooltip);
-
-  // Add labels
-  g.append("text")
-    .attr("x", width / 2)
-    .attr("y", height + margin.bottom - 5)
-    .attr("text-anchor", "middle")
-    .text("Neighborhood");
-
-  g.append("text")
-    .attr("transform", "rotate(-90)")
-    .attr("x", -height / 2)
-    .attr("y", -margin.left + 15)
-    .attr("text-anchor", "middle")
-    .text("Number of Reports");
-}*/
 function renderNeighborhoodChart(data) {
   const container = d3.select("#neighborhood-chart");
   container.selectAll("*").remove();
@@ -835,7 +753,123 @@ function renderStatusChart(data) {
     .attr("transform", d => `translate(${arc.centroid(d)})`)
     .attr("text-anchor", "middle")
     .text(d => d.data.status)
-    .style("font-size", "12px");
+    .style("font-size", "10px");
+}
+
+function renderPriorityChart() {
+  let data = appState.deptData;
+  // Neighborhood filter
+  if (appState.selections.neighborhoodFilter) {
+    data = data.filter(d => d.neighborhoods === appState.selections.neighborhoodFilter);
+  }
+
+  // Date filter
+  const startDate = new Date(appState.selections.dateRangeStart);
+  const endDate = new Date(appState.selections.dateRangeEnd);
+
+  data = data.filter(d => 
+    d.dateCreated >= startDate && d.dateCreated <= endDate
+  );
+
+  const container = d3.select("#priority-chart");
+  container.selectAll("*").remove();
+
+  if (data.length === 0) {
+    container.append("p").text("No data available for current filters.");
+    return;
+  }
+ 
+  const counts = d3.rollup(data, v => v.length, d => d.priority || "NA");
+  const chartData = Array.from(counts, ([priority, count]) => ({ priority, count }))
+    .filter(d => d.priority !== "NA")
+    .sort((a, b) => b.count - a.count);
+ 
+  const margin = { top: 20, right: 100, bottom: 50, left: 210 };
+  const containerRect = container.node().getBoundingClientRect();
+  const width  = containerRect.width - margin.left - margin.right;
+  const height = Math.max(300, chartData.length * 38) - margin.top - margin.bottom;
+ 
+  const svg = container.append("svg")
+    .attr("width",  width  + margin.left + margin.right)
+    .attr("height", height + margin.top  + margin.bottom);
+ 
+  const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+ 
+  const xScale = d3.scaleLinear()
+    .domain([0, d3.max(chartData, d => d.count)])
+    .nice()
+    .range([0, width]);
+ 
+  const yScale = d3.scaleBand()
+    .domain(chartData.map(d => d.priority))
+    .range([0, height])
+    .padding(0.2);
+ 
+  // gridlines
+  g.append("g")
+    .call(d3.axisBottom(xScale).ticks(6).tickSize(height).tickFormat(""))
+    .attr("transform", `translate(0,0)`)
+    .call(g => g.select(".domain").remove())
+    .call(g => g.selectAll("line").attr("stroke", "#e5e7eb"));
+ 
+  g.append("g")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d >= 1000 ? `${(d/1000).toFixed(0)}k` : d));
+ 
+  g.append("g")
+    .call(d3.axisLeft(yScale))
+    .selectAll("text")
+    .style("font-size", "11px");
+ 
+  // sequential blue scale — darkest = busiest department
+  const colorScale = d3.scaleSequential(d3.interpolateBlues)
+    .domain([chartData.length, 0]);
+ 
+  g.selectAll(".bar")
+    .data(chartData)
+    .join("rect")
+    .attr("class", "bar")
+    .attr("x", 0)
+    .attr("y", d => yScale(d.priority))
+    .attr("width", d => xScale(d.count))
+    .attr("height", yScale.bandwidth())
+    .attr("fill", (_, i) => colorScale(i))
+    .attr("rx", 3)
+    .on("mouseover", (event, d) => {
+      const pct = ((d.count / data.length) * 100).toFixed(1);
+      showTooltip(event, `
+        <strong>${d.dept}</strong><br/>
+        Reports: ${d.count.toLocaleString()}<br/>
+        Share: ${pct}%
+      `);
+    })
+    .on("mouseout", hideTooltip);
+ 
+  g.selectAll(".bar-label")
+    .data(chartData)
+    .join("text")
+    .attr("class", "bar-label")
+    .attr("x", d => xScale(d.count) + 6)
+    .attr("y", d => yScale(d.dept) + yScale.bandwidth() / 2)
+    .attr("dy", "0.35em")
+    .style("font-size", "11px")
+    .style("fill", "#374151")
+    .text(d => d.count >= 1000 ? `${(d.count / 1000).toFixed(1)}k` : d.count);
+ 
+  g.append("text")
+    .attr("x", width / 2)
+    .attr("y", height + margin.bottom - 8)
+    .attr("text-anchor", "middle")
+    .style("font-size", "12px")
+    .style("fill", "#6b7280")
+    .text("Number of Reports");
+}
+
+function renderMethodChart() {
+  const container = d3.select("#method-chart");
+  container.selectAll("*").remove();
+  container.append("p").text("Method of receipt data not available in current dataset.");
 }
 
 function renderMapChart(data) {
