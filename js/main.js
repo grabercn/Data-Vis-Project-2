@@ -839,7 +839,7 @@ function renderPriorityChart() {
     .on("mouseover", (event, d) => {
       const pct = ((d.count / data.length) * 100).toFixed(1);
       showTooltip(event, `
-        <strong>${d.dept}</strong><br/>
+        <strong>${d.priority}</strong><br/>
         Reports: ${d.count.toLocaleString()}<br/>
         Share: ${pct}%
       `);
@@ -851,7 +851,7 @@ function renderPriorityChart() {
     .join("text")
     .attr("class", "bar-label")
     .attr("x", d => xScale(d.count) + 6)
-    .attr("y", d => yScale(d.dept) + yScale.bandwidth() / 2)
+    .attr("y", d => yScale(d.priority) + yScale.bandwidth() / 2)
     .attr("dy", "0.35em")
     .style("font-size", "11px")
     .style("fill", "#374151")
@@ -867,9 +867,113 @@ function renderPriorityChart() {
 }
 
 function renderMethodChart() {
+ let data = appState.deptData;
+  // Neighborhood filter
+  if (appState.selections.neighborhoodFilter) {
+    data = data.filter(d => d.neighborhoods === appState.selections.neighborhoodFilter);
+  }
+
+  // Date filter
+  const startDate = new Date(appState.selections.dateRangeStart);
+  const endDate = new Date(appState.selections.dateRangeEnd);
+
+  data = data.filter(d => 
+    d.dateCreated >= startDate && d.dateCreated <= endDate
+  );
+
   const container = d3.select("#method-chart");
   container.selectAll("*").remove();
-  container.append("p").text("Method of receipt data not available in current dataset.");
+
+  if (data.length === 0) {
+    container.append("p").text("No data available for current filters.");
+    return;
+  }
+ 
+  const counts = d3.rollup(data, v => v.length, d => d.method || "NA");
+  const chartData = Array.from(counts, ([method, count]) => ({ method, count }))
+    .filter(d => d.method !== "NA")
+    .sort((a, b) => b.count - a.count);
+ 
+  const margin = { top: 20, right: 100, bottom: 50, left: 210 };
+  const containerRect = container.node().getBoundingClientRect();
+  const width  = containerRect.width - margin.left - margin.right;
+  const height = Math.max(300, chartData.length * 38) - margin.top - margin.bottom;
+ 
+  const svg = container.append("svg")
+    .attr("width",  width  + margin.left + margin.right)
+    .attr("height", height + margin.top  + margin.bottom);
+ 
+  const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+ 
+  const xScale = d3.scaleLinear()
+    .domain([0, d3.max(chartData, d => d.count)])
+    .nice()
+    .range([0, width]);
+ 
+  const yScale = d3.scaleBand()
+    .domain(chartData.map(d => d.method))
+    .range([0, height])
+    .padding(0.2);
+ 
+  // gridlines
+  g.append("g")
+    .call(d3.axisBottom(xScale).ticks(6).tickSize(height).tickFormat(""))
+    .attr("transform", `translate(0,0)`)
+    .call(g => g.select(".domain").remove())
+    .call(g => g.selectAll("line").attr("stroke", "#e5e7eb"));
+ 
+  g.append("g")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d => d >= 1000 ? `${(d/1000).toFixed(0)}k` : d));
+ 
+  g.append("g")
+    .call(d3.axisLeft(yScale))
+    .selectAll("text")
+    .style("font-size", "11px");
+ 
+  // sequential blue scale — darkest = busiest department
+  const colorScale = d3.scaleSequential(d3.interpolateBlues)
+    .domain([chartData.length, 0]);
+ 
+  g.selectAll(".bar")
+    .data(chartData)
+    .join("rect")
+    .attr("class", "bar")
+    .attr("x", 0)
+    .attr("y", d => yScale(d.method))
+    .attr("width", d => xScale(d.count))
+    .attr("height", yScale.bandwidth())
+    .attr("fill", (_, i) => colorScale(i))
+    .attr("rx", 3)
+    .on("mouseover", (event, d) => {
+      const pct = ((d.count / data.length) * 100).toFixed(1);
+      showTooltip(event, `
+        <strong>${d.method}</strong><br/>
+        Reports: ${d.count.toLocaleString()}<br/>
+        Share: ${pct}%
+      `);
+    })
+    .on("mouseout", hideTooltip);
+ 
+  g.selectAll(".bar-label")
+    .data(chartData)
+    .join("text")
+    .attr("class", "bar-label")
+    .attr("x", d => xScale(d.count) + 6)
+    .attr("y", d => yScale(d.method) + yScale.bandwidth() / 2)
+    .attr("dy", "0.35em")
+    .style("font-size", "11px")
+    .style("fill", "#374151")
+    .text(d => d.count >= 1000 ? `${(d.count / 1000).toFixed(1)}k` : d.count);
+ 
+  g.append("text")
+    .attr("x", width / 2)
+    .attr("y", height + margin.bottom - 8)
+    .attr("text-anchor", "middle")
+    .style("font-size", "12px")
+    .style("fill", "#6b7280")
+    .text("Number of Reports");
 }
 
 function renderMapChart(data) {
