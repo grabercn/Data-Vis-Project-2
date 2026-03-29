@@ -1,12 +1,14 @@
 // Pothole Dashboard Configuration
 const CHART_MARGIN = { top: 20, right: 30, bottom: 40, left: 60 };
+const CONTEXT_HEIGHT = 60;
+const BRUSH_DEBOUNCE_MS = 50;
 const PANEL_OPTIONS = ["timeline", "neighborhood", "department", "status", "map", "priority", "method"];
 
 const DEFAULT_SELECTIONS = {
   activePanel: "timeline",
   statusFilter: "",
   neighborhoodFilter: "",
-  dateRangeStart: "2023-01-01", 
+  dateRangeStart: "2023-01-01",
   dateRangeEnd: "2025-09-30",
   addressQuery: ""
 };
@@ -239,7 +241,8 @@ Promise.all([
     neighborhoods,
     statuses,
     addresses,
-    selections: { ...DEFAULT_SELECTIONS }
+    selections: { ...DEFAULT_SELECTIONS },
+    brushSelection: null  // [startDate, endDate] when brush is active on timeline
   };
 
   console.log("Both datasets loaded");
@@ -300,6 +303,7 @@ function bindEvents() {
 
   d3.select("#resetViewButton").on("click", () => {
     appState.selections = { ...DEFAULT_SELECTIONS };
+    appState.brushSelection = null;
     syncControlsFromState();
     renderDashboard();
   });
@@ -384,22 +388,23 @@ function renderTimelineChart(data) {
     return;
   }
 
-  const margin = CHART_MARGIN;
+  const margin = { ...CHART_MARGIN, bottom: CHART_MARGIN.bottom + CONTEXT_HEIGHT + 20 };
   const containerRect = container.node().getBoundingClientRect();
   const width = containerRect.width - margin.left - margin.right;
-  const height = 400 - margin.top - margin.bottom;
+  const mainHeight = 300;
+  const totalHeight = mainHeight + margin.top + margin.bottom;
 
   const svg = container.append("svg")
     .attr("width", width + margin.left + margin.right)
-    .attr("height", height + margin.top + margin.bottom);
+    .attr("height", totalHeight);
 
   const g = svg.append("g")
     .attr("transform", `translate(${margin.left},${margin.top})`);
 
-  // Group data by date for timeline
+  // Group data by month for timeline
   const dateFormatter = d3.timeFormat("%Y-%m");
-  const grouped = d3.rollup(data, 
-    v => v.length, 
+  const grouped = d3.rollup(data,
+    v => v.length,
     d => dateFormatter(d.dateCreated)
   );
 
@@ -408,41 +413,65 @@ function renderTimelineChart(data) {
     count: count
   })).sort((a, b) => a.date - b.date);
 
-  // Scales
+  if (timelineData.length === 0) return;
+
+  // Full x domain (used by context brush)
+  const fullXDomain = d3.extent(timelineData, d => d.date);
+
+  // Determine visible domain based on brush selection
+  const brushSel = appState.brushSelection;
+  const focusXDomain = brushSel ? [brushSel[0], brushSel[1]] : fullXDomain;
+
+  // Filter visible data for the main (focus) chart
+  const focusData = brushSel
+    ? timelineData.filter(d => d.date >= brushSel[0] && d.date <= brushSel[1])
+    : timelineData;
+
+  // --- Focus (main) chart scales ---
   const xScale = d3.scaleTime()
-    .domain(d3.extent(timelineData, d => d.date))
+    .domain(focusXDomain)
     .range([0, width]);
 
   const yScale = d3.scaleLinear()
-    .domain([0, d3.max(timelineData, d => d.count)])
+    .domain([0, d3.max(focusData, d => d.count) || 1])
     .nice()
-    .range([height, 0]);
+    .range([mainHeight, 0]);
 
-  // Line generator
   const line = d3.line()
     .x(d => xScale(d.date))
     .y(d => yScale(d.count))
     .curve(d3.curveMonotoneX);
 
-  // Add axes
-  g.append("g")
-    .attr("transform", `translate(0,${height})`)
-    .call(d3.axisBottom(xScale).tickFormat(d3.timeFormat("%b %Y")));
+  // Clip path so points/line don't overflow during brush zoom
+  svg.append("defs").append("clipPath")
+    .attr("id", "clip-timeline")
+    .append("rect")
+    .attr("width", width)
+    .attr("height", mainHeight);
+
+  const focusGroup = g.append("g").attr("clip-path", "url(#clip-timeline)");
+
+  // Focus axes
+  const xAxis = g.append("g")
+    .attr("class", "axis x-axis")
+    .attr("transform", `translate(0,${mainHeight})`)
+    .call(d3.axisBottom(xScale).ticks(6).tickFormat(d3.timeFormat("%b %Y")));
 
   g.append("g")
+    .attr("class", "axis y-axis")
     .call(d3.axisLeft(yScale));
 
-  // Add line
-  g.append("path")
-    .datum(timelineData)
+  // Focus line
+  focusGroup.append("path")
+    .datum(focusData)
     .attr("fill", "none")
     .attr("stroke", "#2563eb")
     .attr("stroke-width", 2)
     .attr("d", line);
 
-  // Add dots
-  g.selectAll(".dot")
-    .data(timelineData)
+  // Focus dots
+  focusGroup.selectAll(".dot")
+    .data(focusData)
     .join("circle")
     .attr("class", "dot")
     .attr("cx", d => xScale(d.date))
@@ -457,20 +486,98 @@ function renderTimelineChart(data) {
     })
     .on("mouseout", hideTooltip);
 
-  // Add labels
+  // Axis labels
   g.append("text")
     .attr("x", width / 2)
-    .attr("y", height + margin.bottom - 5)
+    .attr("y", mainHeight + 35)
     .attr("text-anchor", "middle")
     .text("Date");
 
   g.append("text")
     .attr("transform", "rotate(-90)")
-    .attr("x", -height / 2)
+    .attr("x", -mainHeight / 2)
     .attr("y", -margin.left + 15)
     .attr("text-anchor", "middle")
     .text("Number of Reports");
+
+  // --- Context (brush) area below the main chart ---
+  const contextY = mainHeight + 50;
+  const context = g.append("g")
+    .attr("class", "context")
+    .attr("transform", `translate(0,${contextY})`);
+
+  const contextXScale = d3.scaleTime()
+    .domain(fullXDomain)
+    .range([0, width]);
+
+  const contextYScale = d3.scaleLinear()
+    .domain([0, d3.max(timelineData, d => d.count) || 1])
+    .range([CONTEXT_HEIGHT, 0]);
+
+  const contextLine = d3.line()
+    .x(d => contextXScale(d.date))
+    .y(d => contextYScale(d.count))
+    .curve(d3.curveMonotoneX);
+
+  // Context area fill
+  const contextArea = d3.area()
+    .x(d => contextXScale(d.date))
+    .y0(CONTEXT_HEIGHT)
+    .y1(d => contextYScale(d.count))
+    .curve(d3.curveMonotoneX);
+
+  context.append("path")
+    .datum(timelineData)
+    .attr("fill", "#e0e7ff")
+    .attr("d", contextArea);
+
+  context.append("path")
+    .datum(timelineData)
+    .attr("fill", "none")
+    .attr("stroke", "#9ca3af")
+    .attr("stroke-width", 1)
+    .attr("d", contextLine);
+
+  // Context x-axis
+  context.append("g")
+    .attr("class", "axis")
+    .attr("transform", `translate(0,${CONTEXT_HEIGHT})`)
+    .call(d3.axisBottom(contextXScale).ticks(6).tickFormat(d3.timeFormat("%b '%y")));
+
+  // Brush
+  const brush = d3.brushX()
+    .extent([[0, 0], [width, CONTEXT_HEIGHT]])
+    .on("brush", function(event) {
+      if (!event.selection) return;
+      const [x0, x1] = event.selection;
+      appState.brushSelection = [contextXScale.invert(x0), contextXScale.invert(x1)];
+      debouncedTimelineUpdate();
+    })
+    .on("end", function(event) {
+      if (!event.selection) {
+        appState.brushSelection = null;
+        debouncedTimelineUpdate();
+      }
+    });
+
+  const brushG = context.append("g")
+    .attr("class", "brush x-brush")
+    .call(brush);
+
+  // Restore brush position if a selection already exists
+  if (brushSel) {
+    const x0 = contextXScale(brushSel[0]);
+    const x1 = contextXScale(brushSel[1]);
+    brushG.call(brush.move, [x0, x1]);
+  }
 }
+
+// Debounced update that re-renders only the focus portion of the timeline
+const debouncedTimelineUpdate = debounce(() => {
+  if (!appState || appState.selections.activePanel !== "timeline") return;
+  const filteredData = getFilteredData();
+  renderTimelineChart(filteredData);
+}, BRUSH_DEBOUNCE_MS);
 
 function renderNeighborhoodChart(data) {
   const container = d3.select("#neighborhood-chart");
