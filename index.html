@@ -4,6 +4,7 @@
     <title>Cincinnati Pothole Repair Dashboard</title>
     <meta charset="UTF-8">
     <link rel="icon" href="data:;base64,iVBORwOKGO=" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.css" />
     <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -107,6 +108,10 @@
 
     <script src="js/d3.v6.min.js"></script>
     <script src="https://d3js.org/topojson.v3.min.js"></script>
+    <!-- Leaflet Map Library -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.min.js"></script>
+    <!-- Leaflet Heat Plugin -->
+    <script src="https://cdn.jsdelivr.net/npm/leaflet.heat@0.2.0/dist/leaflet-heat.min.js"></script>
     <script>
         // Data file configuration for pothole dashboard
         const DATA_CONFIG = {

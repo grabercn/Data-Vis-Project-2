@@ -544,7 +544,20 @@ function renderNeighborhoodChart(data) {
     .attr("width", d => xScale(d.count))
     .attr("height", yScale.bandwidth())
     .attr("fill", (_, i) => colorScale(i))
+    .attr("stroke", d => d.neighborhood === appState.selections.neighborhoodFilter ? "#1f2937" : "none")
+    .attr("stroke-width", 2)
     .attr("rx", 3)
+    .style("cursor", "pointer")
+    .on("click", (event, d) => {
+      // Toggle neighborhood filter for linked interaction
+      if (appState.selections.neighborhoodFilter === d.neighborhood) {
+        appState.selections.neighborhoodFilter = "";
+      } else {
+        appState.selections.neighborhoodFilter = d.neighborhood;
+      }
+      syncControlsFromState();
+      renderDashboard();
+    })
     .on("mouseover", (event, d) => {
       showTooltip(event, `
         <strong>${d.neighborhood}</strong><br/>
@@ -737,8 +750,19 @@ function renderStatusChart(data) {
   arcs.append("path")
     .attr("d", arc)
     .attr("fill", d => colorScale(d.data.status))
-    .attr("stroke", "white")
-    .attr("stroke-width", 2)
+    .attr("stroke", d => d.data.status === appState.selections.statusFilter ? "#1f2937" : "white")
+    .attr("stroke-width", d => d.data.status === appState.selections.statusFilter ? 3 : 2)
+    .style("cursor", "pointer")
+    .on("click", (event, d) => {
+      // Toggle status filter for linked interaction
+      if (appState.selections.statusFilter === d.data.status) {
+        appState.selections.statusFilter = "";
+      } else {
+        appState.selections.statusFilter = d.data.status;
+      }
+      syncControlsFromState();
+      renderDashboard();
+    })
     .on("mouseover", (event, d) => {
       showTooltip(event, `
         <strong>${d.data.status}</strong><br/>
@@ -976,22 +1000,44 @@ function renderMethodChart() {
     .text("Number of Reports");
 }
 
-function renderMapChart(data) {
-  const container = d3.select("#map");
-  container.selectAll("*").remove();
+// Global map instance for interaction
+let mapInstance = null;
+let heatmapLayerGroup = null;
 
-  if (data.length === 0) {
-    container.append("p").text("No data available for current filters.");
+function renderMapChart(data) {
+  const container = document.getElementById("map");
+  
+  if (!container) {
+    console.error("Map container not found");
     return;
   }
 
-  const containerRect = container.node().getBoundingClientRect();
-  const width = containerRect.width;
-  const height = 500;
+  // Check if Leaflet is loaded
+  if (typeof L === 'undefined') {
+    console.error("Leaflet library not loaded. Waiting...");
+    container.innerHTML = "<p style='padding: 20px; color: orange;'>Loading map library...</p>";
+    setTimeout(() => renderMapChart(data), 500);
+    return;
+  }
 
-  const svg = container.append("svg")
-    .attr("width", width)
-    .attr("height", height);
+  // Clear existing map if present
+  if (mapInstance) {
+    try {
+      mapInstance.off();
+      mapInstance.remove();
+      mapInstance = null;
+    } catch (e) {
+      console.warn("Error clearing previous map:", e);
+    }
+  }
+
+  // Clear container content
+  container.innerHTML = "";
+
+  if (data.length === 0) {
+    container.innerHTML = "<p style='padding: 20px;'>No data available for current filters.</p>";
+    return;
+  }
 
   // Filter data with valid coordinates
   const validData = data.filter(d => 
@@ -1000,65 +1046,151 @@ function renderMapChart(data) {
   );
 
   if (validData.length === 0) {
-    container.append("p").text("No location data available for current filters.");
+    container.innerHTML = "<p style='padding: 20px;'>No location data available for current filters.</p>";
     return;
   }
 
-  // Create projection based on data bounds
+  // Calculate center and zoom based on data bounds
   const latExtent = d3.extent(validData, d => d.latitude);
   const lonExtent = d3.extent(validData, d => d.longitude);
+  
+  const centerLat = (latExtent[0] + latExtent[1]) / 2;
+  const centerLon = (lonExtent[0] + lonExtent[1]) / 2;
+  
+  // Get container dimensions
+  const containerRect = container.getBoundingClientRect();
+  const width = containerRect.width;
+  const height = containerRect.height;
 
-  const projection = d3.geoMercator()
-    .domain([[lonExtent[0], latExtent[0]], [lonExtent[1], latExtent[1]]])
-    .fitSize([width - 20, height - 20], {
-      type: "Polygon",
-      coordinates: [[
-        [lonExtent[0], latExtent[0]],
-        [lonExtent[0], latExtent[1]],
-        [lonExtent[1], latExtent[1]],
-        [lonExtent[1], latExtent[0]],
-        [lonExtent[0], latExtent[0]]
-      ]]
+  if (width === 0 || height === 0) {
+    console.warn("Map container has no dimensions, deferring initialization");
+    setTimeout(() => renderMapChart(data), 100);
+    return;
+  }
+
+  // Initialize Leaflet map with explicit dimensions
+  try {
+    // Ensure container is properly sized
+    container.style.width = '100%';
+    container.style.height = '100%';
+    
+    mapInstance = L.map('map', {
+      center: [centerLat, centerLon],
+      zoom: 12,
+      dragging: true,
+      scrollWheelZoom: true,
+      zoomControl: true,
+      attributionControl: false
     });
 
-  const g = svg.append("g")
-    .attr("transform", "translate(10, 10)");
+    // Add base tile layer (OpenStreetMap)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+      maxZoom: 19,
+      minZoom: 9
+    }).addTo(mapInstance);
 
-  // Color scale based on number of potholes
-  const colorScale = d3.scaleSequential(d3.interpolateYlOrRd)
-    .domain([0, d3.max(validData, d => d.numPotholes) || 1]);
+    // Prepare heatmap data: [lat, lon, intensity]
+    // Aggregate potholes count by location for intensity
+    const heatmapData = validData.map(d => [
+      d.latitude,
+      d.longitude,
+      Math.min(d.numPotholes / 5, 1) // Normalize intensity (0-1), using number of potholes
+    ]);
 
-  // Add points
-  g.selectAll(".pothole-point")
-    .data(validData)
-    .join("circle")
-    .attr("class", "pothole-point")
-    .attr("cx", d => projection([d.longitude, d.latitude])[0])
-    .attr("cy", d => projection([d.longitude, d.latitude])[1])
-    .attr("r", d => Math.max(3, Math.sqrt(d.numPotholes + 1) * 2))
-    .attr("fill", d => colorScale(d.numPotholes))
-    .attr("opacity", 0.7)
-    .attr("stroke", "white")
-    .attr("stroke-width", 1)
-    .on("mouseover", (event, d) => {
-      showTooltip(event, `
-        <strong>${d.address}</strong><br/>
-        Status: ${d.status}<br/>
-        Neighborhood: ${d.neighborhood}<br/>
-        Potholes: ${d.numPotholes}<br/>
-        Created: ${d3.timeFormat("%m/%d/%Y")(d.dateCreated)}
+    // Create and add heatmap layer
+    const heatmapLayer = L.heatLayer(heatmapData, {
+      radius: 30,
+      blur: 25,
+      maxZoom: 18,
+      max: 1,
+      gradient: {
+        0.0: '#0000ff',
+        0.25: '#00ff00',
+        0.5: '#ffff00',
+        0.75: '#ff7f00',
+        1.0: '#ff0000'
+      }
+    }).addTo(mapInstance);
+
+    // Add markers with popup/tooltip on top of heatmap for individual data inspection
+    validData.forEach((d, idx) => {
+      const marker = L.circleMarker([d.latitude, d.longitude], {
+        radius: Math.min(5 + Math.sqrt(d.numPotholes), 15),
+        fillColor: '#2563eb',
+        color: '#1e40af',
+        weight: 1,
+        opacity: 0.3,
+        fillOpacity: 0.2
+      }).addTo(mapInstance);
+
+      // Add popup on click for detailed info
+      marker.bindPopup(`
+        <div style="font-size: 12px; max-width: 200px;">
+          <strong>${d.address}</strong><br/>
+          Status: ${d.status}<br/>
+          Neighborhood: ${d.neighborhood}<br/>
+          Potholes: ${d.numPotholes}<br/>
+          Created: ${d3.timeFormat("%m/%d/%Y")(d.dateCreated)}
+        </div>
       `);
-    })
-    .on("mouseout", hideTooltip);
 
-  // Add zoom behavior
-  const zoom = d3.zoom()
-    .scaleExtent([0.5, 10])
-    .on("zoom", (event) => {
-      g.attr("transform", `translate(10, 10) ${event.transform}`);
+      // Add hover effects
+      marker.on('mouseover', function() {
+        this.setStyle({ opacity: 0.7, fillOpacity: 0.5 });
+      });
+
+      marker.on('mouseout', function() {
+        this.setStyle({ opacity: 0.3, fillOpacity: 0.2 });
+      });
     });
 
-  svg.call(zoom);
+    // Add legend
+    const legend = L.control({ position: 'bottomright' });
+    legend.onAdd = function(map) {
+      const div = L.DomUtil.create('div', 'heatmap-legend');
+      div.innerHTML = `
+        <strong style="display: block; margin-bottom: 6px;">Heatmap Intensity</strong>
+        <div class="heatmap-legend-item">
+          <div class="heatmap-legend-color" style="background-color: #0000ff;"></div>
+          <span>Low</span>
+        </div>
+        <div class="heatmap-legend-item">
+          <div class="heatmap-legend-color" style="background-color: #ffff00;"></div>
+          <span>Medium</span>
+        </div>
+        <div class="heatmap-legend-item">
+          <div class="heatmap-legend-color" style="background-color: #ff0000;"></div>
+          <span>High</span>
+        </div>
+        <div style="font-size: 11px; margin-top: 8px; color: #666;">
+          Data Points: ${validData.length}
+        </div>
+      `;
+      L.DomEvent.disableClickPropagation(div);
+      return div;
+    };
+    legend.addTo(mapInstance);
+
+    // Store reference for linked interactions
+    appState.mapData = validData;
+    appState.mapInstance = mapInstance;
+    appState.heatmapLayer = heatmapLayer;
+
+    // Fit map bounds to data
+    const bounds = L.latLngBounds(validData.map(d => [d.latitude, d.longitude]));
+    mapInstance.fitBounds(bounds, { padding: [50, 50] });
+
+    // Invalidate map size to ensure proper rendering
+    mapInstance.invalidateSize();
+
+  } catch (error) {
+    console.error("Error initializing map:", error);
+    console.error("Error details:", error.message, error.stack);
+    console.log("Leaflet available:", typeof L !== 'undefined');
+    console.log("Container:", container);
+    container.innerHTML = `<p style='padding: 20px; color: red;'><strong>Error loading map:</strong> ${error.message}</p>`;
+  }
 }
 
 function updatePanelVisibility() {

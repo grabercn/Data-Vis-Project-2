@@ -222,3 +222,85 @@ body {
 .context-line {
 	shape-rendering: crispEdges;
 }
+
+/* Leaflet map styles */
+#panel-map {
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	width: 100%;
+}
+
+#panel-map .panel-header {
+	margin: 0;
+	padding: 10px;
+	border-bottom: 1px solid #dbe2ea;
+	flex-shrink: 0;
+	z-index: 50;
+}
+
+#panel-map .chart-host {
+	padding: 0;
+	flex: 1;
+	overflow: hidden;
+	position: relative;
+	min-height: 0;
+	width: 100%;
+	height: 100%;
+}
+
+#map {
+	width: 100% !important;
+	height: 100% !important;
+	position: relative;
+	flex: 1;
+	display: block;
+}
+
+.leaflet-container {
+	width: 100%;
+	height: 100%;
+	background: #f0f0f0;
+	font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.heatmap-legend {
+	background: white;
+	padding: 10px;
+	border-radius: 6px;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+	font-size: 12px;
+	z-index: 400;
+}
+
+.heatmap-legend-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 4px;
+	margin-top: 4px;
+}
+
+.heatmap-legend-item:first-child {
+	margin-top: 0;
+}
+
+.heatmap-legend-item:last-child {
+	margin-bottom: 0;
+}
+
+.heatmap-legend-color {
+	width: 20px;
+	height: 12px;
+	border-radius: 2px;
+}
+
+.heatmap-info {
+	background: white;
+	padding: 12px;
+	border-radius: 6px;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+	font-size: 12px;
+	z-index: 400;
+}
