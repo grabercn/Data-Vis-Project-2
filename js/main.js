@@ -2,7 +2,14 @@
 const CHART_MARGIN = { top: 20, right: 30, bottom: 40, left: 60 };
 const CONTEXT_HEIGHT = 60;
 const BRUSH_DEBOUNCE_MS = 50;
-const PANEL_OPTIONS = ["timeline", "neighborhood", "department", "status", "map", "priority", "method"];
+const PANEL_OPTIONS = ["timeline", "neighborhood", "department", "status", "map", "priority", "method", "serviceType"];
+
+// Service Type Colors (accessible palette)
+const SERVICE_TYPE_COLOR_DEFAULTS = {
+  "Pothole, repair": "#E63946",
+  "Pothole repair": "#F77F00",
+  "Pothole": "#D62828",
+};
 
 const DEFAULT_SELECTIONS = {
   activePanel: "timeline",
@@ -214,6 +221,7 @@ Promise.all([
     status: d.SR_STATUS,
     address: d.ADDRESS,
     neighborhood: d.NEIGHBORHOOD,
+    serviceType: (d.SR_TYPE_DESC || "Unknown").trim(),
     dateCreated: new Date(d.DATE_CREATED),
     numPotholes: +d.NUM_POTHOLES || 0,
     latitude: +d.LATITUDE,
@@ -232,7 +240,15 @@ Promise.all([
   // ✅ Filters ONLY from dataset 1
   const neighborhoods = [...new Set(processedData1.map(d => d.neighborhood))].sort();
   const statuses = [...new Set(processedData1.map(d => d.status))].sort();
+  const serviceTypes = [...new Set(processedData1.map(d => d.serviceType))].sort();
   const addresses = [...new Set(processedData1.map(d => d.address))].slice(0, 100);
+
+  // Create color mapping for service types
+  const serviceTypeColors = {};
+  const colorPalette = ["#E63946", "#F77F00", "#D62828", "#457B9D", "#1D3557", "#06A77D", "#8E9AAF", "#A8DADC"];
+  serviceTypes.forEach((type, idx) => {
+    serviceTypeColors[type] = SERVICE_TYPE_COLOR_DEFAULTS[type] || colorPalette[idx % colorPalette.length];
+  });
 
   // ✅ SINGLE appState (correct)
   appState = {
@@ -240,12 +256,15 @@ Promise.all([
     deptData: processedData2,
     neighborhoods,
     statuses,
+    serviceTypes,
+    serviceTypeColors,
     addresses,
     selections: { ...DEFAULT_SELECTIONS },
     brushSelection: null,       // [startDate, endDate] from timeline brush
     selectedDepartments: [],    // from clicking department bars (multi-select)
     selectedPriorities: [],     // from clicking priority bars (multi-select)
-    selectedMethods: []         // from clicking method bars (multi-select)
+    selectedMethods: [],        // from clicking method bars (multi-select)
+    selectedServiceTypes: []    // from clicking service type bars (multi-select)
   };
 
   console.log("Both datasets loaded");
@@ -310,6 +329,7 @@ function bindEvents() {
     appState.selectedDepartments = [];
     appState.selectedPriorities = [];
     appState.selectedMethods = [];
+    appState.selectedServiceTypes = [];
     syncControlsFromState();
     renderDashboard();
   });
@@ -374,6 +394,13 @@ function renderActiveFilters() {
     });
   }
 
+  if (appState.selectedServiceTypes.length > 0) {
+    filters.push({
+      label: "Service Type: " + appState.selectedServiceTypes.join(", "),
+      clear: () => { appState.selectedServiceTypes = []; }
+    });
+  }
+
   if (filters.length === 0) return;
 
   filters.forEach(f => {
@@ -421,6 +448,9 @@ function renderDashboard() {
     case "map":
       renderMapChart(filteredData);
       break;
+    case "serviceType":
+      renderServiceTypeChart(getFilteredData({ excludeServiceType: true }));
+      break;
   }
 }
 
@@ -436,6 +466,11 @@ function getFilteredData(options) {
   // Filter by neighborhood (skip if this chart's own selection is excluded)
   if (appState.selections.neighborhoodFilter && !opts.excludeNeighborhood) {
     filtered = filtered.filter(d => d.neighborhood === appState.selections.neighborhoodFilter);
+  }
+
+  // Filter by service types (skip if this chart's own selection is excluded)
+  if (appState.selectedServiceTypes && appState.selectedServiceTypes.length > 0 && !opts.excludeServiceType) {
+    filtered = filtered.filter(d => appState.selectedServiceTypes.includes(d.serviceType));
   }
 
   // Filter by date range
@@ -1206,6 +1241,162 @@ function renderMethodChart(data) {
     .style("font-size", "12px")
     .style("fill", "#6b7280")
     .text("Number of Reports");
+}
+
+function renderServiceTypeChart(data) {
+  const container = d3.select("#serviceType-chart");
+  container.selectAll("*").remove();
+
+  // Render color customization controls
+  renderServiceTypeColors();
+
+  if (data.length === 0) {
+    container.append("p").text("No data available for current filters.");
+    return;
+  }
+
+  const counts = d3.rollup(data, v => v.length, d => d.serviceType || "NA");
+  const chartData = Array.from(counts, ([serviceType, count]) => ({ serviceType, count }))
+    .filter(d => d.serviceType !== "NA")
+    .sort((a, b) => b.count - a.count);
+
+  const margin = { top: 20, right: 100, bottom: 50, left: 210 };
+  const containerRect = container.node().getBoundingClientRect();
+  const width = containerRect.width - margin.left - margin.right;
+  const height = Math.max(300, chartData.length * 38) - margin.top - margin.bottom;
+
+  const svg = container.append("svg")
+    .attr("width", width + margin.left + margin.right)
+    .attr("height", height + margin.top + margin.bottom);
+
+  const g = svg.append("g")
+    .attr("transform", `translate(${margin.left},${margin.top})`);
+
+  const xScale = d3.scaleLinear()
+    .domain([0, d3.max(chartData, d => d.count)])
+    .nice()
+    .range([0, width]);
+
+  const yScale = d3.scaleBand()
+    .domain(chartData.map(d => d.serviceType))
+    .range([0, height])
+    .padding(0.2);
+
+  // Gridlines
+  g.append("g")
+    .call(d3.axisBottom(xScale).ticks(6).tickSize(height).tickFormat(""))
+    .call(g => g.select(".domain").remove())
+    .call(g => g.selectAll("line").attr("stroke", "#e5e7eb"));
+
+  // X axis
+  g.append("g")
+    .attr("transform", `translate(0,${height})`)
+    .call(d3.axisBottom(xScale).ticks(6));
+
+  // Y axis
+  g.append("g")
+    .call(d3.axisLeft(yScale))
+    .selectAll("text")
+    .style("font-size", "11px");
+
+  // Bars
+  g.selectAll(".bar")
+    .data(chartData)
+    .join("rect")
+    .attr("class", "bar")
+    .attr("x", 0)
+    .attr("y", d => yScale(d.serviceType))
+    .attr("width", d => xScale(d.count))
+    .attr("height", yScale.bandwidth())
+    .attr("fill", d => appState.serviceTypeColors[d.serviceType] || "#999999")
+    .attr("stroke", d => appState.selectedServiceTypes.includes(d.serviceType) ? "#ef4444" : "none")
+    .attr("stroke-width", d => appState.selectedServiceTypes.includes(d.serviceType) ? 3 : 0)
+    .attr("stroke-dasharray", d => appState.selectedServiceTypes.includes(d.serviceType) ? "6,3" : "none")
+    .attr("rx", 3)
+    .style("cursor", "pointer")
+    .on("click", (event, d) => {
+      toggleArraySelection(appState.selectedServiceTypes, d.serviceType);
+      renderDashboard();
+    })
+    .on("mouseover", (event, d) => {
+      const pct = ((d.count / data.length) * 100).toFixed(1);
+      showTooltip(event, `
+        <strong>${d.serviceType}</strong><br/>
+        Reports: ${d.count.toLocaleString()}<br/>
+        Share: ${pct}%<br/>
+        <em>Click to filter</em>
+      `);
+    })
+    .on("mouseout", hideTooltip);
+
+  // Labels
+  g.selectAll(".bar-label")
+    .data(chartData)
+    .join("text")
+    .attr("class", "bar-label")
+    .attr("x", d => xScale(d.count) + 6)
+    .attr("y", d => yScale(d.serviceType) + yScale.bandwidth() / 2)
+    .attr("dy", "0.35em")
+    .style("font-size", "11px")
+    .style("fill", "#374151")
+    .text(d => d.count >= 1000 ? `${(d.count / 1000).toFixed(1)}k` : d.count);
+
+  // Axis label
+  g.append("text")
+    .attr("x", width / 2)
+    .attr("y", height + margin.bottom - 8)
+    .attr("text-anchor", "middle")
+    .style("font-size", "12px")
+    .style("fill", "#6b7280")
+    .text("Number of Reports");
+}
+
+function renderServiceTypeColors() {
+  const container = d3.select("#service-type-colors");
+  container.selectAll("*").remove();
+
+  if (!appState.serviceTypes || appState.serviceTypes.length === 0) return;
+
+  appState.serviceTypes.forEach(type => {
+    const itemDiv = container.append("div")
+      .style("display", "flex")
+      .style("align-items", "center")
+      .style("gap", "6px")
+      .style("padding", "6px")
+      .style("background", "#f9fafb")
+      .style("border-radius", "4px")
+      .style("border", "1px solid #e5e7eb");
+
+    // Color swatch
+    itemDiv.append("div")
+      .style("width", "16px")
+      .style("height", "16px")
+      .style("background-color", appState.serviceTypeColors[type])
+      .style("border", "1px solid #ccc")
+      .style("border-radius", "2px");
+
+    // Label
+    itemDiv.append("label")
+      .style("flex", "1")
+      .style("font-size", "11px")
+      .style("white-space", "nowrap")
+      .style("overflow", "hidden")
+      .style("text-overflow", "ellipsis")
+      .text(type.substring(0, 25) + (type.length > 25 ? "..." : ""));
+
+    // Color picker
+    itemDiv.append("input")
+      .attr("type", "color")
+      .attr("value", appState.serviceTypeColors[type])
+      .style("width", "30px")
+      .style("height", "24px")
+      .style("border", "1px solid #ccc")
+      .style("cursor", "pointer")
+      .on("change", (event) => {
+        appState.serviceTypeColors[type] = event.target.value;
+        renderDashboard();
+      });
+  });
 }
 
 // Global map instance for interaction
