@@ -84,7 +84,7 @@
         </section>
         <section class="panel" id="panel-method">
             <div class="panel-header">
-                <h2>Reports by Contact Method (only for 2025)</h2>
+                <h2>Reports by Contact Method</h2>
             </div>
             <div id="method-chart" class="chart-host"></div>
         </section class="panel" id="panel-method">
@@ -100,6 +100,10 @@
         <section class="panel" id="panel-map">
             <div class="panel-header">
                 <h2 id="map-chart-title">Pothole Locations Map</h2>
+                <div class="map-controls">
+                    <button id="heatmapToggle" class="map-toggle-btn active" data-view="heatmap">Heatmap</button>
+                    <button id="pointsToggle" class="map-toggle-btn" data-view="points">Raw Points</button>
+                </div>
             </div>
             <div id="map" class="chart-host"></div>
         </section>

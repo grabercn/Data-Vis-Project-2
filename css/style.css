@@ -102,9 +102,31 @@ body {
 	background: #f3f4f6;
 }
 
-.tab-button.is-active {
+.map-controls {
+	display: flex;
+	gap: 4px;
+}
+
+.map-toggle-btn {
+	border: 1px solid #cdd5df;
+	border-radius: 4px;
+	padding: 4px 8px;
+	font-size: 11px;
+	background: #fff;
+	color: #1f2937;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.map-toggle-btn:hover {
+	background: #f3f4f6;
+}
+
+.map-toggle-btn.active {
 	background: #e5eefc;
 	border-color: #9fb6e6;
+	color: #1d4ed8;
+	font-weight: 500;
 }
 
 #dashboard {
@@ -150,10 +172,22 @@ body {
 	width: 100%;
 }
 
-.chart-host svg {
+/* Only apply sizing to D3 chart SVGs, not Leaflet SVGs */
+#timeline-chart svg,
+#neighborhood-chart svg,
+#department-chart svg,
+#priority-chart svg,
+#method-chart svg,
+#status-chart svg {
 	display: block;
 	width: 100%;
 	height: 100%;
+}
+
+/* Ensure Leaflet SVG elements are not constrained */
+.leaflet-pane svg {
+	width: auto !important;
+	height: auto !important;
 }
 
 .control-group {
@@ -307,7 +341,7 @@ body {
 	font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
 }
 
-.heatmap-legend {
+.map-legend {
 	background: white;
 	padding: 10px;
 	border-radius: 6px;
