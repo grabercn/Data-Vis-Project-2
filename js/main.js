@@ -19,7 +19,6 @@ let appState = null;
 console.log('Loading pothole data from:', DATA_CONFIG.potholeData);
 
 // Load and process pothole data
-/*d3.csv(DATA_CONFIG.potholeData)
   .then(data => {
     console.log('Raw data loaded, rows:', data.length);
     // Process and clean the data
@@ -209,7 +208,7 @@ Promise.all([
   d3.csv(DATA_CONFIG.potholeData2)
 ]).then(([data1, data2]) => {
 
-  // ✅ FIRST DATASET (original)
+  //  FIRST DATASET (original)
   const processedData1 = data1.map(d => ({
     srNumber: d.SR_NUMBER,
     status: d.SR_STATUS,
@@ -218,10 +217,11 @@ Promise.all([
     dateCreated: new Date(d.DATE_CREATED),
     numPotholes: +d.NUM_POTHOLES || 0,
     latitude: +d.LATITUDE,
-    longitude: +d.LONGITUDE
+    longitude: +d.LONGITUDE,
+    methodReceived: d.METHOD_RECEIVED
   })).filter(d => d.dateCreated && !isNaN(d.dateCreated));
 
-  // ✅ SECOND DATASET (dept)
+  // SECOND DATASET (dept)
   const processedData2 = data2.map(d => ({
     deptName: d.DEPT_NAME,
     priority: d.PRIORITY,
@@ -230,12 +230,12 @@ Promise.all([
     dateCreated: new Date(d.DATE_CREATED)
   })).filter(d => d.dateCreated && !isNaN(d.dateCreated));
 
-  // ✅ Filters ONLY from dataset 1
+  // Filters ONLY from dataset 1
   const neighborhoods = [...new Set(processedData1.map(d => d.neighborhood))].sort();
   const statuses = [...new Set(processedData1.map(d => d.status))].sort();
   const addresses = [...new Set(processedData1.map(d => d.address))].slice(0, 100);
 
-  // ✅ SINGLE appState (correct)
+  //  SINGLE appState (correct)
   appState = {
     data: processedData1,
     deptData: processedData2,
