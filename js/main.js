@@ -34,7 +34,7 @@ Promise.all([
     numPotholes: +d.NUM_POTHOLES || 0,
     latitude: +d.LATITUDE,
     longitude: +d.LONGITUDE,
-    methodReceived: d.METHOD_RECEIVED
+    method: d.METHOD_RECEIVED
   })).filter(d => d.dateCreated && !isNaN(d.dateCreated));
 
   // SECOND DATASET (dept)
@@ -242,7 +242,7 @@ function renderDashboard() {
       renderPriorityChart(getFilteredDeptData({ excludePriority: true }));
       break;
     case "method":
-      renderMethodChart(getFilteredDeptData({ excludeMethod: true }));
+      renderMethodChart(getFilteredData({ excludeMethod: true }));
       break;
     case "status":
       // Show all statuses (exclude own filter) so clicking doesn't hide others
@@ -285,6 +285,10 @@ function getFilteredData(options) {
   if (appState.brushSelection) {
     const [bStart, bEnd] = appState.brushSelection;
     filtered = filtered.filter(d => d.dateCreated >= bStart && d.dateCreated <= bEnd);
+  }
+
+  if (appState.selectedMethods.length > 0 && !opts.excludeMethod) {
+    filtered = filtered.filter(d => appState.selectedMethods.includes(d.method));
   }
 
   return filtered;
