@@ -1,280 +1,93 @@
-// Pothole Dashboard Configuration
+// dashboard config
 const CHART_MARGIN = { top: 20, right: 30, bottom: 40, left: 60 };
 const CONTEXT_HEIGHT = 60;
 const BRUSH_DEBOUNCE_MS = 50;
 const PANEL_OPTIONS = ["timeline", "neighborhood", "department", "status", "map", "priority", "method", "serviceType"];
 
-// Service Type Colors (accessible palette)
+// colors for top service types
 const SERVICE_TYPE_COLOR_DEFAULTS = {
-  "Pothole, repair": "#E63946",
-  "Pothole repair": "#F77F00",
-  "Pothole": "#D62828",
+  "POTHOLE, REPAIR": "#E63946",
+  "TRASH, BULK ITEM PICK-UP": "#F77F00",
+  "METAL FURNITURE, SPEC COLLECTN": "#457B9D",
+  "SLIPPERY STREETS, REQUEST": "#1D3557",
+  "TRASH, MISSED COLLECTION": "#06A77D",
+  "BUILDING, RESIDENTIAL": "#8E44AD",
+  "VEHICLE, OVERTIME PARKER": "#D4A017",
+  "LITTER, PRIVATE PROPERTY": "#2ECC71",
+  "311 ASSISTANCE": "#FF6B6B",
+  "TALL GRASS/WEEDS, PRIVATE PROP": "#4ECDC4",
+  "TRASH, REQUEST FOR COLLECTION": "#C7A94F",
+  "ICY, SNOWY STREETS": "#95E1D3",
+  "SIGN, DOWN/MISSING": "#F38181",
+  "TRASH, IMPROPER SET OUT": "#AA96DA",
+  "SIGNAL, TRAF/PED/SCHOOL REPAIR": "#6C5B7B",
 };
 
 const DEFAULT_SELECTIONS = {
   activePanel: "timeline",
   statusFilter: "",
   neighborhoodFilter: "",
-  dateRangeStart: "2023-01-01",
-  dateRangeEnd: "2025-09-30",
+  dateRangeStart: "2025-01-01",
+  dateRangeEnd: "2026-12-31",
   addressQuery: ""
 };
 
 let appState = null;
 
-console.log('Loading pothole data from:', DATA_CONFIG.potholeData);
-
-// Load and process pothole data
-/*d3.csv(DATA_CONFIG.potholeData)
-  .then(data => {
-    console.log('Raw data loaded, rows:', data.length);
-    // Process and clean the data
-    const processedData = data.map(d => ({
-      srNumber: d.SR_NUMBER,
-      status: d.SR_STATUS,
-      statusFlag: d.SR_STATUS_FLAG,
-      typeDesc: d.SR_TYPE_DESC,
-      address: d.ADDRESS,
-      location: d.LOCATION,
-      dateCreated: new Date(d.DATE_CREATED),
-      plannedEndDate: d.PLANNED_END_DATE ? new Date(d.PLANNED_END_DATE) : null,
-      dateClosed: d.DATE_CLOSED ? new Date(d.DATE_CLOSED) : null,
-      closedByPlanned: d["Closed by Planned End Date"],
-      streetDirection: d.STREET_DIRECTION,
-      streetNo: d.STREET_NO,
-      streetName: d.STREET_NAME,
-      zipcode: d.ZIPCODE,
-      numPotholes: +d.NUM_POTHOLES || 0,
-      methodReceived: d.METHOD_RECEIVED,
-      neighborhood: d.NEIGHBORHOOD,
-      snaNeighborhood: d.SNA_NEIGHBORHOOD,
-      ccNeighborhood: d.CC_NEIGHBORHOOD,
-      latitude: +d.LATITUDE,
-      longitude: +d.LONGITUDE,
-      xCoord: +d.X_COORD,
-      yCoord: +d.Y_COORD
-    })).filter(d => d.dateCreated && !isNaN(d.dateCreated.getTime()));
-
-    // Extract unique values for filters
-    const neighborhoods = [...new Set(processedData.map(d => d.neighborhood))].sort();
-    const statuses = [...new Set(processedData.map(d => d.status))].sort();
-    const addresses = [...new Set(processedData.map(d => d.address))].slice(0, 100); // Limit for performance
-
-    console.log('Processed data:', processedData.length, 'records');
-    console.log('Sample record:', processedData[0]);
-    
-    appState = {
-      data: processedData,
-      neighborhoods: neighborhoods,
-      statuses: statuses,
-      addresses: addresses,
-      selections: { ...DEFAULT_SELECTIONS }
+// load csv and build app state
+d3.csv(DATA_CONFIG.serviceData).then(data => {
+  const processedData = data.map(d => {
+    const dateClosed = d.date_closed ? new Date(d.date_closed) : null;
+    return {
+      srNumber: d.sr_number,
+      serviceType: (d.sr_type_desc || "Unknown").trim(),
+      status: (dateClosed && !isNaN(dateClosed)) ? "CLOSED" : "OPEN",
+      neighborhood: d.neighborhood || "",
+      deptName: d.dept_name || "",
+      priority: d.priority || "",
+      method: d.method_received || "",
+      dateCreated: new Date(d.date_created),
+      dateClosed: dateClosed,
+      latitude: +d.latitude,
+      longitude: +d.longitude
     };
-    
-    console.log('App state initialized');
+  }).filter(d => d.dateCreated && !isNaN(d.dateCreated));
 
-    setupFilters();
-    bindEvents();
-    syncUrlState();
-    renderDashboard();
+  const neighborhoods = [...new Set(processedData.map(d => d.neighborhood))].filter(Boolean).sort();
+  const statuses = [...new Set(processedData.map(d => d.status))].sort();
+  const serviceTypes = [...new Set(processedData.map(d => d.serviceType))].sort();
 
-    window.addEventListener("resize", debounce(renderDashboard, 150));
-  })
-  .catch(error => {
-    console.error("Error loading pothole data:", error);
-    console.log("Attempting to use sample data for testing...");
-    
-    // Create sample data for testing when CSV won't load
-    const sampleData = [
-      {
-        srNumber: "SR23000001",
-        status: "CLOSED",
-        address: "100 MAIN ST",
-        neighborhood: "DOWNTOWN",
-        dateCreated: new Date("2023-01-15"),
-        dateClosed: new Date("2023-01-20"),
-        numPotholes: 2,
-        latitude: 39.1031,
-        longitude: -84.5120
-      },
-      {
-        srNumber: "SR23000002", 
-        status: "OPEN",
-        address: "200 ELM ST",
-        neighborhood: "OTR", 
-        dateCreated: new Date("2023-02-10"),
-        dateClosed: null,
-        numPotholes: 1,
-        latitude: 39.1100,
-        longitude: -84.5150
-      },
-      {
-        srNumber: "SR23000003",
-        status: "CLOSED", 
-        address: "300 VINE ST",
-        neighborhood: "DOWNTOWN",
-        dateCreated: new Date("2023-03-05"),
-        dateClosed: new Date("2023-03-12"), 
-        numPotholes: 3,
-        latitude: 39.1050,
-        longitude: -84.5090
-      }
-    ];
-    
-    console.log("Using sample data:", sampleData.length, "records");
-    
-    appState = {
-      data: sampleData,
-      neighborhoods: ["DOWNTOWN", "OTR"],
-      statuses: ["OPEN", "CLOSED"],
-      addresses: sampleData.map(d => d.address),
-      selections: { ...DEFAULT_SELECTIONS }
-    };
-    
-    setupFilters();
-    bindEvents(); 
-    renderDashboard();
-    
-    // Show message to user
-    const message = document.createElement('div');
-    message.style.cssText = 'position: fixed; top: 10px; right: 10px; background: #fef3c7; border: 1px solid #f59e0b; padding: 10px; border-radius: 6px; z-index: 1000; max-width: 300px; font-size: 12px;';
-    message.innerHTML = `
-      <strong>Using Sample Data</strong><br/>
-      Could not load CSV file. Showing sample data for demonstration.<br/>
-      <strong>To fix:</strong> Serve from <a href="http://localhost:8000" target="_blank" style="color: #1d4ed8;">http://localhost:8000</a>
-    `;
-    document.body.appendChild(message);
-    
-    setTimeout(() => message.remove(), 10000);
-  });
-
-d3.csv(DATA_CONFIG.potholeData2)
-  .then(data => {
-    console.log('Raw data loaded, rows:', data.length);
-    // Process and clean the data
-    const processedData = data.map(d => ({
-      srNumber: d.SR_NUMBER,
-      userId: d.USER_ID,
-      srType: d.SR_TYPE,
-      srTypeDesc: d.SR_TYPE_DESC,
-      priority: d.PRIORITY,
-      deptName: d.DEPT_NAME,
-      methodReceived: d.METHOD_RECEIVED,
-      neighborhood: d.NEIGHBORHOOD,
-      timeReceived: d.TIME_RECEIVED,
-      dateCreated: new Date(d.DATE_CREATED),
-      plannedCompletionDays: +d.PLANNED_COMPLETION_DAYS || 0,
-      dateClosed: d.DATE_CLOSED ? new Date(d.DATE_CLOSED) : null
-    })).filter(d => d.dateCreated && !isNaN(d.dateCreated.getTime()));
-
-    // Extract unique values for filters
-    const neighborhoods = [...new Set(processedData.map(d => d.neighborhood))].sort();
-    
-
-    console.log('Processed data:', processedData.length, 'records');
-    console.log('Sample record:', processedData[0]);
-    
-    appState = {
-    data: originalData,        // first dataset
-    deptData: processedData,   // second dataset
-    neighborhoods,
-    statuses,
-    addresses,
-    selections: { ...DEFAULT_SELECTIONS }
-};
-    
-    console.log('App state initialized');
-
-    setupFilters();
-    bindEvents();
-    syncUrlState();
-    renderDashboard();
-
-    window.addEventListener("resize", debounce(renderDashboard, 150));
-  })
-  .catch(error => {
-    console.error("Error loading pothole data:", error);
-    setupFilters();
-    bindEvents(); 
-    renderDashboard();
-    
-    // Show message to user
-    const message = document.createElement('div');
-    message.style.cssText = 'position: fixed; top: 10px; right: 10px; background: #fef3c7; border: 1px solid #f59e0b; padding: 10px; border-radius: 6px; z-index: 1000; max-width: 300px; font-size: 12px;';
-    message.innerHTML = `
-      <strong>Using Sample Data</strong><br/>
-      Could not load CSV file. Showing sample data for demonstration.<br/>
-      <strong>To fix:</strong> Serve from <a href="http://localhost:8000" target="_blank" style="color: #1d4ed8;">http://localhost:8000</a>
-    `;
-    document.body.appendChild(message);
-    
-    setTimeout(() => message.remove(), 10000);
-  });*/
-Promise.all([
-  d3.csv(DATA_CONFIG.potholeData),
-  d3.csv(DATA_CONFIG.potholeData2)
-]).then(([data1, data2]) => {
-
-  // ✅ FIRST DATASET (original)
-  const processedData1 = data1.map(d => ({
-    srNumber: d.SR_NUMBER,
-    status: d.SR_STATUS,
-    address: d.ADDRESS,
-    neighborhood: d.NEIGHBORHOOD,
-    serviceType: (d.SR_TYPE_DESC || "Unknown").trim(),
-    dateCreated: new Date(d.DATE_CREATED),
-    numPotholes: +d.NUM_POTHOLES || 0,
-    latitude: +d.LATITUDE,
-    longitude: +d.LONGITUDE
-  })).filter(d => d.dateCreated && !isNaN(d.dateCreated));
-
-  // ✅ SECOND DATASET (dept)
-  const processedData2 = data2.map(d => ({
-    deptName: d.DEPT_NAME,
-    priority: d.PRIORITY,
-    method: d.METHOD_RECEIVED,
-    neighborhoods: d.NEIGHBORHOOD,
-    dateCreated: new Date(d.DATE_CREATED)
-  })).filter(d => d.dateCreated && !isNaN(d.dateCreated));
-
-  // ✅ Filters ONLY from dataset 1
-  const neighborhoods = [...new Set(processedData1.map(d => d.neighborhood))].sort();
-  const statuses = [...new Set(processedData1.map(d => d.status))].sort();
-  const serviceTypes = [...new Set(processedData1.map(d => d.serviceType))].sort();
-  const addresses = [...new Set(processedData1.map(d => d.address))].slice(0, 100);
-
-  // Create color mapping for service types
+  // color each type
   const serviceTypeColors = {};
-  const colorPalette = ["#E63946", "#F77F00", "#D62828", "#457B9D", "#1D3557", "#06A77D", "#8E9AAF", "#A8DADC"];
   serviceTypes.forEach((type, idx) => {
-    serviceTypeColors[type] = SERVICE_TYPE_COLOR_DEFAULTS[type] || colorPalette[idx % colorPalette.length];
+    serviceTypeColors[type] = SERVICE_TYPE_COLOR_DEFAULTS[type]
+      || d3.interpolateRainbow(idx / serviceTypes.length);
   });
 
-  // ✅ SINGLE appState (correct)
   appState = {
-    data: processedData1,
-    deptData: processedData2,
+    data: processedData,
+    deptData: processedData,   // same data, dept charts read from here
     neighborhoods,
     statuses,
     serviceTypes,
     serviceTypeColors,
-    addresses,
+    addresses: [],
     selections: { ...DEFAULT_SELECTIONS },
-    brushSelection: null,       // [startDate, endDate] from timeline brush
-    selectedDepartments: [],    // from clicking department bars (multi-select)
-    selectedPriorities: [],     // from clicking priority bars (multi-select)
-    selectedMethods: [],        // from clicking method bars (multi-select)
-    selectedServiceTypes: []    // from clicking service type bars (multi-select)
+    brushSelection: null,
+    selectedDepartments: [],
+    selectedPriorities: [],
+    selectedMethods: [],
+    selectedServiceTypes: []
   };
 
-  console.log("Both datasets loaded");
+  console.log("Loaded", processedData.length, "service requests,", serviceTypes.length, "types");
 
   setupFilters();
   bindEvents();
   syncUrlState();
   renderDashboard();
-
-}); 
+  window.addEventListener("resize", debounce(renderDashboard, 150));
+});
 
 function setupFilters() {
   // Setup neighborhood filter
@@ -481,7 +294,7 @@ function getFilteredData(options) {
   // Filter by address search
   if (appState.selections.addressQuery) {
     filtered = filtered.filter(d =>
-      d.address.toLowerCase().includes(appState.selections.addressQuery)
+      (d.address || "").toLowerCase().includes(appState.selections.addressQuery)
     );
   }
 
@@ -500,7 +313,7 @@ function getFilteredDeptData(options) {
   let data = appState.deptData;
 
   if (appState.selections.neighborhoodFilter) {
-    data = data.filter(d => d.neighborhoods === appState.selections.neighborhoodFilter);
+    data = data.filter(d => d.neighborhood === appState.selections.neighborhoodFilter);
   }
 
   const startDate = new Date(appState.selections.dateRangeStart);
@@ -523,6 +336,11 @@ function getFilteredDeptData(options) {
 
   if (appState.selectedMethods.length > 0 && !opts.excludeMethod) {
     data = data.filter(d => appState.selectedMethods.includes(d.method));
+  }
+
+  // also filter dept data by selected service types
+  if (appState.selectedServiceTypes.length > 0) {
+    data = data.filter(d => appState.selectedServiceTypes.includes(d.serviceType));
   }
 
   return data;
@@ -630,7 +448,7 @@ function renderTimelineChart(data) {
     .on("mouseover", (event, d) => {
       showTooltip(event, `
         <strong>${d3.timeFormat("%B %Y")(d.date)}</strong><br/>
-        Pothole Reports: ${d.count}
+        Service Requests: ${d.count}
       `);
     })
     .on("mouseout", hideTooltip);
@@ -741,7 +559,7 @@ function renderNeighborhoodChart(data) {
     return;
   }
 
-  // ✅ Group data
+  // group data
   const counts = d3.rollup(data, v => v.length, d => d.neighborhood);
 
   const chartData = Array.from(counts, ([neighborhood, count]) => ({
@@ -1399,214 +1217,369 @@ function renderServiceTypeColors() {
   });
 }
 
-// Global map instance for interaction
+// map persists so we don't rebuild tiles every tab switch
 let mapInstance = null;
-let heatmapLayerGroup = null;
+let mapMarkerLayers = {};
+let mapHeatLayer = null;
+let mapViewMode = "points";
+let mapValidData = [];
 
 function renderMapChart(data) {
   const container = document.getElementById("map");
-  
-  if (!container) {
-    console.error("Map container not found");
-    return;
-  }
+  if (!container) return;
 
-  // Check if Leaflet is loaded
   if (typeof L === 'undefined') {
-    console.error("Leaflet library not loaded. Waiting...");
     container.innerHTML = "<p style='padding: 20px; color: orange;'>Loading map library...</p>";
     setTimeout(() => renderMapChart(data), 500);
     return;
   }
 
-  // Clear existing map if present
-  if (mapInstance) {
-    try {
-      mapInstance.off();
-      mapInstance.remove();
-      mapInstance = null;
-    } catch (e) {
-      console.warn("Error clearing previous map:", e);
-    }
-  }
-
-  // Clear container content
-  container.innerHTML = "";
-
-  if (data.length === 0) {
-    container.innerHTML = "<p style='padding: 20px;'>No data available for current filters.</p>";
-    return;
-  }
-
-  // Filter data with valid coordinates
-  const validData = data.filter(d => 
-    d.latitude && d.longitude && 
-    !isNaN(d.latitude) && !isNaN(d.longitude)
+  // only keep points inside Cincinnati bounds
+  const validData = data.filter(d =>
+    d.latitude && d.longitude &&
+    !isNaN(d.latitude) && !isNaN(d.longitude) &&
+    d.latitude > 39.0 && d.latitude < 39.25 &&
+    d.longitude > -84.7 && d.longitude < -84.3
   );
 
-  if (validData.length === 0) {
-    container.innerHTML = "<p style='padding: 20px;'>No location data available for current filters.</p>";
-    return;
-  }
-
-  // Calculate center and zoom based on data bounds
-  const latExtent = d3.extent(validData, d => d.latitude);
-  const lonExtent = d3.extent(validData, d => d.longitude);
-  
-  const centerLat = (latExtent[0] + latExtent[1]) / 2;
-  const centerLon = (lonExtent[0] + lonExtent[1]) / 2;
-  
-  // Get container dimensions
-  const containerRect = container.getBoundingClientRect();
-  const width = containerRect.width;
-  const height = containerRect.height;
-
-  if (width === 0 || height === 0) {
-    console.warn("Map container has no dimensions, deferring initialization");
-    setTimeout(() => renderMapChart(data), 100);
-    return;
-  }
-
-  // Initialize Leaflet map with explicit dimensions
-  try {
-    // Ensure container is properly sized
+  // create map once, reuse after
+  if (!mapInstance) {
+    container.innerHTML = "";
     container.style.width = '100%';
     container.style.height = '100%';
-    
+
+    const containerRect = container.getBoundingClientRect();
+    if (containerRect.width === 0 || containerRect.height === 0) {
+      setTimeout(() => renderMapChart(data), 100);
+      return;
+    }
+
+    // center on UC campus
     mapInstance = L.map('map', {
-      center: [centerLat, centerLon],
-      zoom: 12,
-      dragging: true,
-      scrollWheelZoom: true,
-      zoomControl: true,
+      center: [39.1320, -84.5150],
+      zoom: 16,
+      preferCanvas: true,
       attributionControl: false
     });
 
-    // Add base tile layer (OpenStreetMap)
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-      maxZoom: 19,
-      minZoom: 9
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19, minZoom: 9
     }).addTo(mapInstance);
 
-    // Prepare heatmap data: [lat, lon, intensity]
-    // Aggregate potholes count by location for intensity
-    const heatmapData = validData.map(d => [
-      d.latitude,
-      d.longitude,
-      Math.min(d.numPotholes / 5, 1) // Normalize intensity (0-1), using number of potholes
-    ]);
-
-    // Create and add heatmap layer
-    const heatmapLayer = L.heatLayer(heatmapData, {
-      radius: 30,
-      blur: 25,
-      maxZoom: 18,
-      max: 1,
-      gradient: {
-        0.0: '#0000ff',
-        0.25: '#00ff00',
-        0.5: '#ffff00',
-        0.75: '#ff7f00',
-        1.0: '#ff0000'
+    // click near a point to see its details
+    mapInstance.on('click', function(e) {
+      let closest = null, minDist = Infinity;
+      mapValidData.forEach(d => {
+        const dist = Math.pow(d.latitude - e.latlng.lat, 2) + Math.pow(d.longitude - e.latlng.lng, 2);
+        if (dist < minDist) { minDist = dist; closest = d; }
+      });
+      if (closest && minDist < 0.0001) {
+        L.popup()
+          .setLatLng([closest.latitude, closest.longitude])
+          .setContent(`
+            <div style="font-size:12px;max-width:220px;">
+              <strong>${closest.serviceType}</strong><br/>
+              Status: ${closest.status}<br/>
+              Neighborhood: ${closest.neighborhood}<br/>
+              Dept: ${closest.deptName}<br/>
+              Created: ${d3.timeFormat("%m/%d/%Y")(closest.dateCreated)}
+            </div>`)
+          .openOn(mapInstance);
       }
-    }).addTo(mapInstance);
-
-    // Add markers with popup/tooltip on top of heatmap for individual data inspection
-    validData.forEach((d, idx) => {
-      const marker = L.circleMarker([d.latitude, d.longitude], {
-        radius: Math.min(5 + Math.sqrt(d.numPotholes), 15),
-        fillColor: '#2563eb',
-        color: '#1e40af',
-        weight: 1,
-        opacity: 0.3,
-        fillOpacity: 0.2
-      }).addTo(mapInstance);
-
-      // Add popup on click for detailed info
-      marker.bindPopup(`
-        <div style="font-size: 12px; max-width: 200px;">
-          <strong>${d.address}</strong><br/>
-          Status: ${d.status}<br/>
-          Neighborhood: ${d.neighborhood}<br/>
-          Potholes: ${d.numPotholes}<br/>
-          Created: ${d3.timeFormat("%m/%d/%Y")(d.dateCreated)}<br/>
-          <hr style="margin: 6px 0;"/>
-          <a href="#" onclick="filterByNeighborhood('${d.neighborhood}'); return false;" style="color: #2563eb; text-decoration: none;">
-             Filter by neighborhood
-          </a><br/>
-          <a href="#" onclick="filterByStatus('${d.status}'); return false;" style="color: #2563eb; text-decoration: none;">
-            ✓ Filter by status
-          </a>
-        </div>
-      `);
-
-      // Add hover effects - highlight on hover
-      marker.on('mouseover', function() {
-        this.setStyle({ opacity: 0.7, fillOpacity: 0.5, weight: 2 });
-      });
-
-      marker.on('mouseout', function() {
-        this.setStyle({ opacity: 0.3, fillOpacity: 0.2, weight: 1 });
-      });
     });
 
-    // Add legend
-    const legend = L.control({ position: 'bottomright' });
-    legend.onAdd = function(map) {
-      const div = L.DomUtil.create('div', 'heatmap-legend');
-      
-      let activeFilters = '';
-      if (appState.selections.neighborhoodFilter) {
-        activeFilters += `<div style="color: #2563eb; font-weight: 600; margin-top: 6px;"> ${appState.selections.neighborhoodFilter}</div>`;
-      }
-      if (appState.selections.statusFilter) {
-        activeFilters += `<div style="color: #059669; font-weight: 600;">✓ ${appState.selections.statusFilter}</div>`;
-      }
-      
-      div.innerHTML = `
-        <strong style="display: block; margin-bottom: 6px;">Heatmap Intensity</strong>
-        <div class="heatmap-legend-item">
-          <div class="heatmap-legend-color" style="background-color: #0000ff;"></div>
-          <span>Low</span>
-        </div>
-        <div class="heatmap-legend-item">
-          <div class="heatmap-legend-color" style="background-color: #ffff00;"></div>
-          <span>Medium</span>
-        </div>
-        <div class="heatmap-legend-item">
-          <div class="heatmap-legend-color" style="background-color: #ff0000;"></div>
-          <span>High</span>
-        </div>
-        <div style="font-size: 11px; margin-top: 8px; color: #666;">
-          Data Points: ${validData.length}
-        </div>
-        ${activeFilters ? `<div style="font-size: 11px; margin-top: 6px; padding-top: 6px; border-top: 1px solid #e5e7eb;">${activeFilters}</div>` : ''}
-      `;
-      L.DomEvent.disableClickPropagation(div);
-      return div;
-    };
-    legend.addTo(mapInstance);
-
-    // Store reference for linked interactions
-    appState.mapData = validData;
-    appState.mapInstance = mapInstance;
-    appState.heatmapLayer = heatmapLayer;
-
-    // Fit map bounds to data
-    const bounds = L.latLngBounds(validData.map(d => [d.latitude, d.longitude]));
-    mapInstance.fitBounds(bounds, { padding: [50, 50] });
-
-    // Invalidate map size to ensure proper rendering
-    mapInstance.invalidateSize();
-
-  } catch (error) {
-    console.error("Error initializing map:", error);
-    console.error("Error details:", error.message, error.stack);
-    console.log("Leaflet available:", typeof L !== 'undefined');
-    console.log("Container:", container);
-    container.innerHTML = `<p style='padding: 20px; color: red;'><strong>Error loading map:</strong> ${error.message}</p>`;
+    // redraw on pan/zoom
+    mapInstance.on('moveend', function() {
+      if (mapViewMode === "points") renderViewportMarkers();
+      else updateMapStats();
+    });
   }
+
+  // wipe old layers before adding new ones
+  Object.values(mapMarkerLayers).forEach(lg => mapInstance.removeLayer(lg));
+  mapMarkerLayers = {};
+  if (mapHeatLayer) { mapInstance.removeLayer(mapHeatLayer); mapHeatLayer = null; }
+
+  if (validData.length === 0) return;
+
+  // toggle heatmap vs points
+  const heatBtn = document.getElementById("heatmapToggle");
+  const pointsBtn = document.getElementById("pointsToggle");
+  heatBtn.classList.toggle("active", mapViewMode === "heatmap");
+  pointsBtn.classList.toggle("active", mapViewMode === "points");
+  heatBtn.onclick = () => { mapViewMode = "heatmap"; renderMapChart(data); };
+  pointsBtn.onclick = () => { mapViewMode = "points"; renderMapChart(data); };
+
+  // save for pan/zoom redraws
+  mapValidData = validData;
+
+  if (mapViewMode === "heatmap") {
+    // heatmap uses all points
+    const heatData = validData.map(d => [d.latitude, d.longitude, 0.5]);
+    mapHeatLayer = L.heatLayer(heatData, {
+      radius: 18, blur: 15, maxZoom: 17, max: 1,
+      gradient: { 0: '#0000ff', 0.25: '#00ff00', 0.5: '#ffff00', 0.75: '#ff7f00', 1: '#ff0000' }
+    }).addTo(mapInstance);
+  } else {
+    // points mode renders only whats in view
+    renderViewportMarkers();
+  }
+
+  // rebuild controls each render
+  if (mapInstance._customControls) {
+    mapInstance._customControls.forEach(c => mapInstance.removeControl(c));
+  }
+  mapInstance._customControls = [];
+
+  // types sorted by frequency
+  const typeCounts = d3.rollup(validData, v => v.length, d => d.serviceType);
+  const sortedTypes = Array.from(typeCounts.entries())
+    .sort((a, b) => b[1] - a[1]);
+
+  // filter panel
+  const filterCtrl = L.control({ position: 'topright' });
+  filterCtrl.onAdd = function() {
+    const wrapper = L.DomUtil.create('div', '');
+
+    const toggleBtn = document.createElement('button');
+    toggleBtn.textContent = 'Filter Types';
+    toggleBtn.style.cssText = 'background:#fff;border:1px solid #cdd5df;border-radius:4px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,.1);display:block;';
+    wrapper.appendChild(toggleBtn);
+
+    const panel = document.createElement('div');
+    panel.className = 'map-legend';
+    panel.style.cssText = 'max-height:45vh;width:240px;display:none;flex-direction:column;margin-top:4px;';
+
+    // all/none links
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-shrink:0;';
+    const titleSpan = document.createElement('strong');
+    titleSpan.style.fontSize = '12px';
+    titleSpan.textContent = 'Service Types';
+    header.appendChild(titleSpan);
+    const btnGroup = document.createElement('span');
+    btnGroup.style.fontSize = '10px';
+    const allBtn = document.createElement('a');
+    allBtn.textContent = 'All';
+    allBtn.href = '#';
+    allBtn.style.cssText = 'margin-right:6px;color:#2563eb;';
+    allBtn.onclick = (e) => { e.preventDefault(); appState.selectedServiceTypes = []; renderDashboard(); };
+    const noneBtn = document.createElement('a');
+    noneBtn.textContent = 'None';
+    noneBtn.href = '#';
+    noneBtn.style.color = '#2563eb';
+    noneBtn.onclick = (e) => { e.preventDefault(); appState.selectedServiceTypes = ['__none__']; renderDashboard(); };
+    btnGroup.appendChild(allBtn);
+    btnGroup.appendChild(noneBtn);
+    header.appendChild(btnGroup);
+    panel.appendChild(header);
+
+    // type checkboxes
+    const list = document.createElement('div');
+    list.style.cssText = 'overflow-y:auto;flex:1;';
+    sortedTypes.forEach(([type, count]) => {
+      const row = document.createElement('label');
+      row.style.cssText = 'display:flex;align-items:center;gap:4px;padding:2px 0;font-size:10px;cursor:pointer;';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.style.cssText = 'margin:0;flex-shrink:0;';
+      cb.checked = appState.selectedServiceTypes.length === 0 || appState.selectedServiceTypes.includes(type);
+      cb.addEventListener('change', () => {
+        if (appState.selectedServiceTypes.length === 0) {
+          appState.selectedServiceTypes = appState.serviceTypes.filter(t => t !== type);
+        } else {
+          toggleArraySelection(appState.selectedServiceTypes, type);
+          if (appState.selectedServiceTypes.length === appState.serviceTypes.length) {
+            appState.selectedServiceTypes = [];
+          }
+        }
+        renderDashboard();
+      });
+      const swatch = document.createElement('span');
+      swatch.style.cssText = 'width:10px;height:10px;border-radius:2px;flex-shrink:0;background:' + (appState.serviceTypeColors[type] || '#999');
+      const lbl = document.createElement('span');
+      lbl.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      lbl.textContent = type;
+      lbl.title = type;
+      const badge = document.createElement('span');
+      badge.style.cssText = 'color:#999;flex-shrink:0;font-size:9px;';
+      badge.textContent = count.toLocaleString();
+      row.appendChild(cb);
+      row.appendChild(swatch);
+      row.appendChild(lbl);
+      row.appendChild(badge);
+      list.appendChild(row);
+    });
+    panel.appendChild(list);
+    wrapper.appendChild(panel);
+
+    toggleBtn.addEventListener('click', () => {
+      const open = panel.style.display === 'flex';
+      panel.style.display = open ? 'none' : 'flex';
+      toggleBtn.textContent = open ? 'Filter Types' : 'Close Filters';
+    });
+
+    L.DomEvent.disableClickPropagation(wrapper);
+    L.DomEvent.disableScrollPropagation(wrapper);
+    return wrapper;
+  };
+  filterCtrl.addTo(mapInstance);
+  mapInstance._customControls.push(filterCtrl);
+
+  // stats panel
+  const statsCtrl = L.control({ position: 'bottomleft' });
+  statsCtrl.onAdd = function() {
+    const wrapper = L.DomUtil.create('div', '');
+
+    const body = document.createElement('div');
+    body.className = 'map-legend';
+    body.id = 'map-stats';
+    body.style.cssText = 'font-size:11px;min-width:180px;';
+    wrapper.appendChild(body);
+
+    const hideBtn = document.createElement('button');
+    hideBtn.textContent = 'Hide Stats';
+    hideBtn.style.cssText = 'background:#fff;border:1px solid #cdd5df;border-radius:4px;padding:3px 8px;font-size:10px;cursor:pointer;margin-top:4px;box-shadow:0 1px 3px rgba(0,0,0,.1);';
+    wrapper.appendChild(hideBtn);
+
+    hideBtn.addEventListener('click', () => {
+      const open = body.style.display !== 'none';
+      body.style.display = open ? 'none' : 'block';
+      hideBtn.textContent = open ? 'Show Stats' : 'Hide Stats';
+    });
+
+    L.DomEvent.disableClickPropagation(wrapper);
+    return wrapper;
+  };
+  statsCtrl.addTo(mapInstance);
+  mapInstance._customControls.push(statsCtrl);
+  updateMapStats();
+
+  setTimeout(() => mapInstance.invalidateSize(), 50);
+}
+
+// draw only markers visible on screen
+function renderViewportMarkers() {
+  if (!mapInstance || !mapValidData.length) return;
+
+  // clear old point layers
+  Object.values(mapMarkerLayers).forEach(lg => mapInstance.removeLayer(lg));
+  mapMarkerLayers = {};
+
+  const bounds = mapInstance.getBounds();
+  const visible = mapValidData.filter(d =>
+    d.latitude >= bounds.getSouth() && d.latitude <= bounds.getNorth() &&
+    d.longitude >= bounds.getWest() && d.longitude <= bounds.getEast()
+  );
+
+  const byType = d3.group(visible, d => d.serviceType);
+  byType.forEach((points, type) => {
+    const color = appState.serviceTypeColors[type] || "#999";
+    const layer = L.layerGroup();
+    points.forEach(d => {
+      L.circleMarker([d.latitude, d.longitude], {
+        radius: 4, fillColor: color, color: color, weight: 0, fillOpacity: 0.6
+      }).addTo(layer);
+    });
+    layer.addTo(mapInstance);
+    mapMarkerLayers[type] = layer;
+  });
+
+  updateMapStats();
+}
+
+// refresh the stats box
+function updateMapStats() {
+  const el = document.getElementById('map-stats');
+  if (!el || !mapInstance) return;
+  el.innerHTML = '';
+
+  const bounds = mapInstance.getBounds();
+  const visible = mapValidData.filter(d =>
+    d.latitude >= bounds.getSouth() && d.latitude <= bounds.getNorth() &&
+    d.longitude >= bounds.getWest() && d.longitude <= bounds.getEast()
+  );
+
+  if (visible.length === 0) {
+    el.innerHTML = '<strong>No requests in view</strong>';
+    return;
+  }
+
+  const topTypes = Array.from(d3.rollup(visible, v => v.length, d => d.serviceType).entries())
+    .sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const openCount = visible.filter(d => d.status === 'OPEN').length;
+  const closedCount = visible.length - openCount;
+  const pctClosed = Math.round(closedCount / visible.length * 100);
+  const neighborhoods = new Set(visible.map(d => d.neighborhood).filter(Boolean));
+
+  // header
+  el.innerHTML = '<strong style="font-size:12px;">Area Stats</strong>'
+    + '<div style="margin:4px 0;padding-bottom:4px;border-bottom:1px solid #eee;">'
+    + visible.length.toLocaleString() + ' in view'
+    + '<span style="color:#888;"> / ' + mapValidData.length.toLocaleString() + '</span></div>';
+
+  // status filter buttons
+  const statusRow = document.createElement('div');
+  statusRow.style.cssText = 'display:flex;gap:4px;margin:6px 0;';
+  ['CLOSED', 'OPEN'].forEach(status => {
+    const btn = document.createElement('button');
+    const count = status === 'OPEN' ? openCount : closedCount;
+    const pct = status === 'CLOSED' ? pctClosed : (100 - pctClosed);
+    const active = appState.selections.statusFilter === status;
+    const clr = status === 'CLOSED' ? '#059669' : '#dc2626';
+    btn.textContent = status + ' ' + pct + '% (' + count.toLocaleString() + ')';
+    btn.style.cssText = 'flex:1;border:1px solid ' + (active ? clr : '#cdd5df') + ';border-radius:4px;padding:3px 6px;font-size:10px;cursor:pointer;background:' + (active ? clr + '18' : '#fff') + ';color:' + clr + ';font-weight:' + (active ? '600' : '400') + ';';
+    btn.onclick = () => {
+      appState.selections.statusFilter = active ? '' : status;
+      syncControlsFromState();
+      renderDashboard();
+    };
+    statusRow.appendChild(btn);
+  });
+  el.appendChild(statusRow);
+
+  // progress bar
+  const bar = document.createElement('div');
+  bar.style.cssText = 'background:#fee2e2;border-radius:3px;height:5px;overflow:hidden;margin-bottom:6px;';
+  bar.innerHTML = '<div style="background:#059669;width:' + pctClosed + '%;height:100%;"></div>';
+  el.appendChild(bar);
+
+  // top types (click to filter)
+  const typeHeader = document.createElement('div');
+  typeHeader.style.cssText = 'font-size:10px;margin-bottom:2px;';
+  typeHeader.innerHTML = '<strong>Top types</strong> <span style="color:#888;font-weight:400;">(click to filter)</span>';
+  el.appendChild(typeHeader);
+
+  topTypes.forEach(([type, count]) => {
+    const color = appState.serviceTypeColors[type] || '#999';
+    const active = appState.selectedServiceTypes.includes(type);
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:10px;margin:2px 0;padding:2px 4px;border-radius:3px;cursor:pointer;background:' + (active ? color + '18' : 'transparent') + ';border:1px solid ' + (active ? color : 'transparent') + ';';
+    row.title = 'Click to toggle ' + type;
+    row.innerHTML = '<span style="width:8px;height:8px;border-radius:2px;background:' + color + ';flex-shrink:0;display:inline-block;"></span>'
+      + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + type + '</span>'
+      + '<span style="color:#888;">' + count.toLocaleString() + '</span>';
+    row.onclick = () => {
+      // toggle this type in/out of selectedServiceTypes
+      if (appState.selectedServiceTypes.length === 0) {
+        appState.selectedServiceTypes = [type];
+      } else if (active) {
+        appState.selectedServiceTypes = appState.selectedServiceTypes.filter(t => t !== type);
+        if (appState.selectedServiceTypes.length === 0) appState.selectedServiceTypes = [];
+      } else {
+        appState.selectedServiceTypes.push(type);
+      }
+      renderDashboard();
+    };
+    el.appendChild(row);
+  });
+
+  // neighborhoods in view
+  const foot = document.createElement('div');
+  foot.style.cssText = 'margin-top:6px;font-size:10px;color:#666;border-top:1px solid #eee;padding-top:4px;';
+  foot.textContent = neighborhoods.size + ' neighborhood' + (neighborhoods.size !== 1 ? 's' : '') + ' in view';
+  el.appendChild(foot);
 }
 
 function updatePanelVisibility() {
